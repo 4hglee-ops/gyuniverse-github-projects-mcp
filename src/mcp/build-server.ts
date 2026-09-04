@@ -17,6 +17,10 @@ import {
   listProjects,
   updateProjectItemField,
 } from "../github/projects.js";
+import {
+  parseGitHubIssueOrPullRequestUrl,
+  resolveGitHubIssueOrPullRequest,
+} from "../github/references.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -39,7 +43,7 @@ function projectIdOf(project: unknown): string {
 export function buildMcpServer({ config, client }: BuildServerOptions): McpServer {
   const server = new McpServer({
     name: "gyuniverse-github-projects-mcp",
-    version: "0.1.0",
+    version: "0.2.0",
   });
 
   async function resolveProject(owner: string, number: number): Promise<unknown> {
@@ -85,7 +89,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   server.registerTool(
     "list_github_project_fields",
     {
-      description: "List fields, single-select options, and iterations configured on a GitHub Project v2.",
+      description: "List fields, single-select options, multi-select options, and iterations configured on a GitHub Project v2.",
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -109,6 +113,22 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     async ({ owner, number, first }) => {
       await resolveProject(owner, number);
       return json(await listProjectItems(client, owner, number, first));
+    },
+  );
+
+  server.registerTool(
+    "resolve_github_issue_or_pr_url",
+    {
+      description: "Resolve an allowed github.com Issue or Pull Request URL to its GraphQL content node ID and canonical metadata.",
+      inputSchema: z.object({
+        url: z.string().url(),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ url }) => {
+      const parsed = parseGitHubIssueOrPullRequestUrl(url);
+      assertOwnerAllowed(config, parsed.owner);
+      return json(await resolveGitHubIssueOrPullRequest(client, url));
     },
   );
 
