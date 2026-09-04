@@ -22,6 +22,7 @@ import {
   parseGitHubIssueOrPullRequestUrl,
   resolveGitHubIssueOrPullRequest,
 } from "../github/references.js";
+import { analyzeProjectStateGaps } from "../workflow/state-gaps.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -173,6 +174,53 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     async ({ owner, number, first }) => {
       await resolveProject(owner, number);
       return json(await getProjectSnapshot(client, owner, number, first));
+    },
+  );
+
+  server.registerTool(
+    "analyze_github_project_state_gaps",
+    {
+      description: "Analyze an allowed GitHub Project snapshot for missing Status and missing assignee gaps while preserving item evidence.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        number: z.number().int().min(1),
+        first: z.number().int().min(1).max(100).default(100),
+        statusFieldName: z.string().min(1).default("Status"),
+        assigneeFieldNames: z.array(z.string().min(1)).max(10).default(["Assignees", "Assignee"]),
+        completedStatusNames: z.array(z.string().min(1)).max(20).default(["Done", "Completed", "Closed"]),
+        includeArchived: z.boolean().default(false),
+        includeCompletedForAssignee: z.boolean().default(false),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({
+      owner,
+      number,
+      first,
+      statusFieldName,
+      assigneeFieldNames,
+      completedStatusNames,
+      includeArchived,
+      includeCompletedForAssignee,
+    }) => {
+      await resolveProject(owner, number);
+      const snapshot = await getProjectSnapshot(client, owner, number, first) as Parameters<typeof analyzeProjectStateGaps>[0];
+      const analysis = analyzeProjectStateGaps(snapshot, {
+        statusFieldName,
+        assigneeFieldNames,
+        completedStatusNames,
+        includeArchived,
+        includeCompletedForAssignee,
+      });
+      return json({
+        ...analysis,
+        coverage: {
+          requestedItems: first,
+          returnedItems: snapshot.itemCount ?? 0,
+          completeBeyondFirstPage: false,
+          note: "State-gap analysis currently uses the normalized snapshot path, which is bounded by the requested first value (max 100). Use the pagination-aware Project item resolver for exhaustive single-item lookup.",
+        },
+      });
     },
   );
 
