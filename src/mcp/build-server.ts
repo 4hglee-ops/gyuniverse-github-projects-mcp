@@ -8,6 +8,7 @@ import {
   assertProjectWriteAllowed,
 } from "../config.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
+import { findProjectItemByContentId } from "../github/project-items.js";
 import {
   addItemToProject,
   getProject,
@@ -129,6 +130,32 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       const parsed = parseGitHubIssueOrPullRequestUrl(url);
       assertOwnerAllowed(config, parsed.owner);
       return json(await resolveGitHubIssueOrPullRequest(client, url));
+    },
+  );
+
+  server.registerTool(
+    "resolve_github_project_item",
+    {
+      description: "Resolve an allowed GitHub Issue or Pull Request URL to the matching item in an allowed GitHub Project, following Project item pagination when needed.",
+      inputSchema: z.object({
+        projectOwner: z.string().min(1),
+        projectNumber: z.number().int().min(1),
+        url: z.string().url(),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ projectOwner, projectNumber, url }) => {
+      const parsed = parseGitHubIssueOrPullRequestUrl(url);
+      assertOwnerAllowed(config, parsed.owner);
+      await resolveProject(projectOwner, projectNumber);
+      const resolvedContent = await resolveGitHubIssueOrPullRequest(client, url);
+      const projectItem = await findProjectItemByContentId(
+        client,
+        projectOwner,
+        projectNumber,
+        resolvedContent.contentId,
+      );
+      return json({ resolvedContent, projectItem });
     },
   );
 
