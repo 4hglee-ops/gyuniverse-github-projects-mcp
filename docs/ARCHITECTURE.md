@@ -4,16 +4,48 @@
 
 `gyuniverse-github-projects-mcp` is a focused MCP server for GitHub Projects v2. It intentionally does not reimplement the whole GitHub API. Repository code, Issues, Pull Requests, Actions, and review workflows can continue to use existing GitHub tooling; this server owns the Projects-specific team-state and workflow layer.
 
-## Layers
+## Local and remote entry points
+
+The same MCP tool surface is built by `src/mcp/build-server.ts` and can be reached through two different transport boundaries.
 
 ```text
-ChatGPT / Claude / Codex
-          |
-          v
-        MCP
-          |
-          v
-src/mcp/build-server.ts
+Local AI client
+    |
+    | stdio
+    v
+src/mcp/stdio.ts
+    |
+    v
+buildMcpServer()
+```
+
+```text
+ChatGPT / Claude / remote client
+    |
+    | MCP OAuth bearer token
+    v
+src/http/router.ts
+    |
+    +--> OAuth discovery / registration / authorize / token
+    |
+    v
+src/http/remote-mcp.ts
+    |
+    | request-scoped effective AppConfig
+    v
+buildMcpServer()
+    |
+    | server-side GitHub credential
+    v
+GitHub GraphQL API
+```
+
+The client-facing OAuth credential is never the GitHub credential. `GITHUB_TOKEN` remains server-side and is used only by `GitHubGraphQlClient`.
+
+## Core Projects layers
+
+```text
+buildMcpServer()
           |
           +---------------------------+
           |                           |
@@ -48,51 +80,101 @@ src/workflow/
 └── write-audit.ts           # bounded process-local mutation audit metadata
 ```
 
-## Design principles
+## Remote HTTP / OAuth layers
 
-1. **Projects-focused**: Avoid duplicating general GitHub repository tooling.
-2. **Read-first**: Read operations are the default operating mode.
-3. **Explicit writes**: Mutations require `GITHUB_PROJECTS_WRITE_ENABLED=true`.
-4. **Allowlist boundaries**: Owners and optionally Project node IDs can be restricted; an explicit Project allowlist is mandatory for writes.
-5. **No delete tools**: destructive Project/Project-item deletion is intentionally absent.
-6. **Evidence-preserving normalization**: snapshots retain repository, issue/PR number, URL, assignee, project fields, and item IDs.
-7. **Workflow state is not completion proof**: AI brief contracts must not treat assignment, intention, or an open PR as completed implementation.
-8. **High-level workflow writes are preferred**: Status/Priority tools resolve exact field/option names internally instead of asking the model to supply raw field/option node IDs.
-9. **Verify writes**: high-level Status/Priority writes validate item→Project membership before mutation and re-read the field after mutation.
-10. **No-op before mutation**: if the requested Status/Priority is already set, the high-level path skips the mutation.
-11. **Bounded audit metadata**: process-local write audit records operation/target/outcome/verification metadata without storing tokens, Authorization headers, or arbitrary raw mutation payloads.
+```text
+src/http/
+├── router.ts                 # platform-neutral Request -> Response routing
+└── remote-mcp.ts             # bearer validation + request-scoped MCP handler
 
-## Current tool surface
+src/oauth/
+├── stateless.ts              # signed client/code/token envelopes + scope policy
+└── endpoints.ts              # discovery, DCR, approval, PKCE token exchange
+```
 
-### Read / analysis
+Current public route contract:
 
-- `list_github_projects`
-- `get_github_project`
-- `list_github_project_fields`
-- `list_github_project_items`
-- `resolve_github_issue_or_pr_url`
-- `resolve_github_project_item`
-- `get_github_project_snapshot`
-- `analyze_github_project_state_gaps`
-- `analyze_github_project_reconciliation`
-- `create_github_project_state_checkpoint` (process-local state only; no GitHub mutation)
-- `compare_github_project_state_checkpoint`
-- `get_github_project_brief_context`
-- `list_github_project_write_audit_log`
+```text
+/.well-known/oauth-protected-resource
+/.well-known/oauth-authorization-server
+/.well-known/openid-configuration
+/oauth/register
+/oauth/authorize
+/oauth/token
+/mcp
+/health
+```
 
-### Write (disabled by default)
+`router.ts` is intentionally hosting-provider neutral. A future deployment adapter should only translate the provider/runtime request into the standard Fetch Request/Response contract and must not duplicate authorization logic.
 
-Preferred workflow-level tools:
+## OAuth credential model
 
-- `update_github_project_item_status`
-- `update_github_project_item_priority`
+There are two distinct credential planes.
 
-Lower-level compatibility tools:
+```text
+AI client credential
+  = MCP OAuth access token
+  = audience-bound to PUBLIC_BASE_URL/mcp
+  = projects:read by default
 
-- `add_github_project_item`
-- `update_github_project_item_field`
+Server GitHub credential
+  = GITHUB_TOKEN
+  = never returned to the client
+  = constrained independently by GitHub permission + owner/project allowlists
+```
 
-The lower-level tools remain gated and allowlisted, but they expose IDs directly and therefore provide fewer semantic safety checks than the workflow-level Status/Priority tools. New AI workflows should prefer the high-level tools when applicable.
+Current signed OAuth envelopes are HMAC-authenticated with `MCP_OAUTH_SIGNING_SECRET`. Dynamic registration creates a signed public-client identifier. Authorization codes and tokens are resource-bound to the canonical `/mcp` resource.
+
+The authorization flow requires:
+
+- registered/allowlisted redirect URI
+- authorization code flow
+- PKCE S256
+- expected resource parameter
+- supported scope
+- human `MCP_OAUTH_TEAM_CODE` approval
+- short-lived authorization code
+- code-verifier match at token exchange
+
+Supported redirect URI families are intentionally limited to known ChatGPT, Claude, and localhost development callbacks.
+
+## Remote write defense in depth
+
+Remote read access uses `projects:read`.
+
+Remote write access is not enabled merely because a client requests `projects:write`.
+
+The final request-scoped MCP configuration computes:
+
+```text
+remote writeEnabled
+  = server GITHUB_PROJECTS_WRITE_ENABLED
+    AND OAuth token contains projects:write
+```
+
+Additionally, `projects:write` is not advertised or accepted unless:
+
+```text
+MCP_OAUTH_WRITE_ENABLED=true
+```
+
+A remote mutation therefore requires all of the following:
+
+```text
+MCP_OAUTH_WRITE_ENABLED=true
+        AND
+OAuth token has projects:write
+        AND
+GITHUB_PROJECTS_WRITE_ENABLED=true
+        AND
+explicit Project node ID allowlist match
+        AND
+normal tool-level validation succeeds
+```
+
+The high-level Status/Priority tools then add item→Project membership verification, exact field/option resolution, no-op detection, and post-mutation read-back verification.
+
+A `projects:read` token forces GitHub writes off for that request even when the process-level GitHub write gate is enabled.
 
 ## High-level Status/Priority update sequence
 
@@ -127,14 +209,96 @@ re-read Project membership + field value
 verified success + audit record
 ```
 
-## Process-local state
+## OAuth replay semantics
 
-Checkpoint baselines and write audit entries are currently held in MCP process memory. They do not introduce a database or cloud dependency and do not survive process restart. Persistent state is a separate architecture decision and is not implied by the current M2 implementation.
+Authorization codes are signed and expire quickly, but signature + expiry alone do not make a bearer authorization code one-time-use.
 
-The write audit is bounded to the most recent 200 records and exposes at most 200 records per read. It records structured metadata rather than full request/error bodies.
+M3 therefore includes a consumed-code replay store. Its current implementation is process-local:
+
+```text
+authorization code exchange
+        |
+        v
+verify signature / client / redirect / resource / PKCE
+        |
+        v
+consume code in in-memory replay store
+        |
+        +-- already consumed --> invalid_grant
+        |
+        v
+issue tokens
+```
+
+This gives correct one-time semantics only within the same process lifetime.
+
+It is **not** a distributed replay guarantee across independent serverless instances or horizontally scaled workers. Production topology must account for this explicitly rather than assuming stateless signed codes solve replay globally.
+
+A shared replay/grant store would solve the distributed case but introduces a persistent external dependency. An external authorization provider is another valid architecture, but also changes the authentication boundary. Neither is introduced implicitly by the M3 core.
+
+## Process-local operational state
+
+The following are currently process-local:
+
+- Project checkpoint baselines
+- write audit entries
+- OAuth consumed authorization-code replay state
+
+Checkpoint and audit loss on restart is an accepted current product limitation. Authorization-code replay state has stronger security semantics and therefore directly affects the acceptable production deployment topology.
+
+## Design principles
+
+1. **Projects-focused**: Avoid duplicating general GitHub repository tooling.
+2. **Read-first**: Read operations are the default operating mode.
+3. **Credential separation**: MCP OAuth credentials never expose or replace the server GitHub credential.
+4. **Explicit writes**: Local GitHub mutations require `GITHUB_PROJECTS_WRITE_ENABLED=true`.
+5. **Remote write is stricter**: Remote writes additionally require explicitly enabled OAuth write scope.
+6. **Allowlist boundaries**: Owners and optionally Project node IDs can be restricted; an explicit Project allowlist is mandatory for writes.
+7. **No delete tools**: destructive Project/Project-item deletion is intentionally absent.
+8. **Evidence-preserving normalization**: snapshots retain repository, issue/PR number, URL, assignee, project fields, and item IDs.
+9. **Workflow state is not completion proof**: AI brief contracts must not treat assignment, intention, or an open PR as completed implementation.
+10. **High-level workflow writes are preferred**: Status/Priority tools resolve exact field/option names internally instead of asking the model to supply raw field/option node IDs.
+11. **Verify writes**: high-level Status/Priority writes validate item→Project membership before mutation and re-read the field after mutation.
+12. **No-op before mutation**: if the requested Status/Priority is already set, the high-level path skips the mutation.
+13. **Bounded audit metadata**: process-local write audit records operation/target/outcome/verification metadata without storing tokens, Authorization headers, or arbitrary raw mutation payloads.
+14. **Provider-neutral remote core**: OAuth and MCP authorization semantics live outside any hosting adapter.
+15. **Fail closed on deployment uncertainty**: multi-instance replay semantics must be solved explicitly before claiming production-safe distributed OAuth deployment.
+
+## Current tool surface
+
+### Read / analysis
+
+- `list_github_projects`
+- `get_github_project`
+- `list_github_project_fields`
+- `list_github_project_items`
+- `resolve_github_issue_or_pr_url`
+- `resolve_github_project_item`
+- `get_github_project_snapshot`
+- `analyze_github_project_state_gaps`
+- `analyze_github_project_reconciliation`
+- `create_github_project_state_checkpoint` (process-local state only; no GitHub mutation)
+- `compare_github_project_state_checkpoint`
+- `get_github_project_brief_context`
+- `list_github_project_write_audit_log`
+
+### Write (disabled by default)
+
+Preferred workflow-level tools:
+
+- `update_github_project_item_status`
+- `update_github_project_item_priority`
+
+Lower-level compatibility tools:
+
+- `add_github_project_item`
+- `update_github_project_item_field`
 
 ## Remaining boundaries
 
 - normalized snapshot-wide analysis is still bounded by the first 100 returned Project items; the pagination-aware single-item resolver is exhaustive within configured page limits
-- real write integration tests require an intentionally write-capable token, explicit Project allowlist, and write gate; CI remains secret-free and does not run write smoke tests
-- Draft PR → Ready for review, merge, release, deployment, auth migration, persistent storage, and external integrations remain human-governance or architecture boundaries
+- real write integration tests require an intentionally write-capable GitHub credential, explicit Project allowlist, and write gate; CI remains secret-free and does not run write smoke tests
+- the remote OAuth/MCP core is not yet attached to a selected production runtime
+- live ChatGPT/Claude connection tests require a reachable deployed HTTPS endpoint and deployment secrets
+- multi-instance/serverless OAuth code replay semantics require either a topology constraint or shared state/auth service
+- Draft PR → Ready for review, merge, release, actual deployment, credential provisioning, shared storage, and external auth-provider adoption remain human-governance / architecture boundaries
