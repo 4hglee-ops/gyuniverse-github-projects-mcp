@@ -3,22 +3,17 @@ import { z } from "zod";
 
 import {
   type AppConfig,
-  assertOwnerAllowed,
   assertProjectWriteAllowed,
 } from "../config.js";
 import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
 import { SnapshotService } from "../core/snapshots/snapshot-service.js";
+import { WorkItemService } from "../core/work-items/work-item-service.js";
 import { WorkflowService } from "../core/workflow/workflow-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
-import { findProjectItemByContentId } from "../github/project-items.js";
 import {
   addItemToProject,
   updateProjectItemField,
 } from "../github/projects.js";
-import {
-  parseGitHubIssueOrPullRequestUrl,
-  resolveGitHubIssueOrPullRequest,
-} from "../github/references.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
 import { registerWorkflowWriteTools, writeAuditLog } from "./workflow-write-tools.js";
 
@@ -40,6 +35,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   const projectService = new ProjectService({ config, client });
   const snapshotService = new SnapshotService(projectService);
   const workflowService = new WorkflowService(snapshotService);
+  const workItemService = new WorkItemService({ config, client, projects: projectService });
   const resolveProject = projectService.resolveProject.bind(projectService);
 
   registerCheckpointTools({ server, client, resolveProject, json });
@@ -101,11 +97,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ url }) => {
-      const parsed = parseGitHubIssueOrPullRequestUrl(url);
-      assertOwnerAllowed(config, parsed.owner);
-      return json(await resolveGitHubIssueOrPullRequest(client, url));
-    },
+    async ({ url }) => json(await workItemService.resolveWorkItemUrl(url)),
   );
 
   server.registerTool(
@@ -119,19 +111,9 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ projectOwner, projectNumber, url }) => {
-      const parsed = parseGitHubIssueOrPullRequestUrl(url);
-      assertOwnerAllowed(config, parsed.owner);
-      await projectService.resolveProject(projectOwner, projectNumber);
-      const resolvedContent = await resolveGitHubIssueOrPullRequest(client, url);
-      const projectItem = await findProjectItemByContentId(
-        client,
-        projectOwner,
-        projectNumber,
-        resolvedContent.contentId,
-      );
-      return json({ resolvedContent, projectItem });
-    },
+    async ({ projectOwner, projectNumber, url }) => json(
+      await workItemService.resolveProjectItem(projectOwner, projectNumber, url),
+    ),
   );
 
   server.registerTool(
