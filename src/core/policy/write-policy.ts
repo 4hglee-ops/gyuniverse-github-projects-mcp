@@ -50,6 +50,7 @@ export class WritePolicy {
     const permission = OPERATION_PERMISSION[request.operation];
 
     if (this.principal) {
+      this.identity.assertProjectMembership(this.principal, request.projectId);
       this.identity.assertPermission(this.principal, "project.write");
       this.identity.assertPermission(this.principal, permission);
     }
@@ -66,6 +67,7 @@ export class WritePolicy {
             "global-write-gate",
             "explicit-project-allowlist",
             "authenticated-principal",
+            "project-membership",
             "operation-permission",
           ]
         : ["global-write-gate", "explicit-project-allowlist"],

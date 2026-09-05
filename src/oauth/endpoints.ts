@@ -1,3 +1,4 @@
+import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   AccessTokenPayload,
@@ -43,6 +44,8 @@ interface AuthorizationParams {
   resource: string;
   scope: string;
 }
+
+const LEGACY_TEAM_SUBJECT = "gyuniverse-projects-team";
 
 export const authorizationCodeReplayStore: OAuthReplayStore =
   createOAuthReplayStore();
@@ -157,7 +160,7 @@ function paramsFromUrl(url: URL): AuthorizationParams {
   };
 }
 
-async function paramsFromForm(request: Request): Promise<{ params: AuthorizationParams; teamCode: string }> {
+async function paramsFromForm(request: Request): Promise<{ params: AuthorizationParams; accessCode: string }> {
   const form = await request.formData();
   return {
     params: {
@@ -170,7 +173,7 @@ async function paramsFromForm(request: Request): Promise<{ params: Authorization
       resource: String(form.get("resource") ?? ""),
       scope: normalizeScope(String(form.get("scope") ?? "")),
     },
-    teamCode: String(form.get("team_code") ?? ""),
+    accessCode: String(form.get("access_code") ?? form.get("team_code") ?? ""),
   };
 }
 
@@ -212,15 +215,15 @@ function approvalPage(params: AuthorizationParams, error?: string): Response {
 
   const writeRequested = scopeIncludes(params.scope, OAUTH_WRITE_SCOPE);
   const scopeDescription = writeRequested
-    ? "GitHub Projects 읽기와, 서버의 별도 write gate가 허용하는 Status/Priority 등 Project 변경"
+    ? "GitHub Projects 읽기와, 서버의 별도 write gate 및 사용자 권한이 허용하는 Project 변경"
     : "GitHub Projects 읽기 및 상태 분석";
   const warning = writeRequested
-    ? "<p><strong>쓰기 scope가 요청되었습니다.</strong> OAuth 승인만으로 쓰기가 활성화되지는 않으며, 서버 write gate와 Project allowlist도 모두 충족해야 합니다.</p>"
+    ? "<p><strong>쓰기 scope가 요청되었습니다.</strong> OAuth 승인만으로 쓰기가 활성화되지는 않으며, 사용자 Role/Project membership, 서버 write gate, Project allowlist를 모두 충족해야 합니다.</p>"
     : "<p><strong>이 연결은 OAuth 기준 read-only입니다.</strong></p>";
   const errorHtml = error ? `<p style="color:#b42318;font-weight:600">${escapeHtml(error)}</p>` : "";
 
   return new Response(
-    `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gyuniverse Projects 연결 승인</title></head><body style="font-family:system-ui,-apple-system,sans-serif;background:#f6f7f9;margin:0;padding:32px;color:#111827"><main style="max-width:560px;margin:48px auto;background:white;padding:28px;border-radius:14px;border:1px solid #e5e7eb"><h1 style="font-size:22px;margin-top:0">Gyuniverse GitHub Projects 연결 승인</h1><p>연결하려는 AI 클라이언트가 다음 범위에 접근하려고 합니다.</p><p>${escapeHtml(scopeDescription)}</p>${warning}${errorHtml}<form method="post" action="/oauth/authorize">${hidden}<label style="display:block;font-weight:600;margin:18px 0 8px">팀 접근 코드</label><input type="password" name="team_code" autocomplete="off" required style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px"><button type="submit" style="margin-top:18px;padding:10px 16px;border:0;border-radius:8px;background:#111827;color:white;font-weight:600">연결 승인</button></form></main></body></html>`,
+    `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Gyuniverse Projects 연결 승인</title></head><body style="font-family:system-ui,-apple-system,sans-serif;background:#f6f7f9;margin:0;padding:32px;color:#111827"><main style="max-width:560px;margin:48px auto;background:white;padding:28px;border-radius:14px;border:1px solid #e5e7eb"><h1 style="font-size:22px;margin-top:0">Gyuniverse GitHub Projects 연결 승인</h1><p>연결하려는 AI 클라이언트가 다음 범위에 접근하려고 합니다.</p><p>${escapeHtml(scopeDescription)}</p>${warning}${errorHtml}<form method="post" action="/oauth/authorize">${hidden}<label style="display:block;font-weight:600;margin:18px 0 8px">개인 접근 코드</label><input type="password" name="access_code" autocomplete="off" required style="width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px"><button type="submit" style="margin-top:18px;padding:10px 16px;border:0;border-radius:8px;background:#111827;color:white;font-weight:600">연결 승인</button></form></main></body></html>`,
     {
       status: error ? 403 : 200,
       headers: {
@@ -230,6 +233,15 @@ function approvalPage(params: AuthorizationParams, error?: string): Response {
       },
     },
   );
+}
+
+function subjectForAccessCode(accessCode: string): string | null {
+  const identity = OAuthIdentityRegistry.fromEnvironment().resolveByAccessCode(accessCode);
+  if (identity) return identity.subject;
+
+  const expectedTeamCode = oauthTeamCode();
+  if (expectedTeamCode && accessCode === expectedTeamCode) return LEGACY_TEAM_SUBJECT;
+  return null;
 }
 
 export async function authorizeOAuth(request: Request): Promise<Response> {
@@ -242,7 +254,7 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
 
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
 
-  let parsed: { params: AuthorizationParams; teamCode: string };
+  let parsed: { params: AuthorizationParams; accessCode: string };
   try {
     parsed = await paramsFromForm(request);
   } catch {
@@ -252,9 +264,9 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
   const error = await validateAuthorization(parsed.params);
   if (error) return new Response(error, { status: 400 });
 
-  const expectedTeamCode = oauthTeamCode();
-  if (!expectedTeamCode || parsed.teamCode !== expectedTeamCode) {
-    return approvalPage(parsed.params, "팀 접근 코드가 올바르지 않습니다.");
+  const subject = subjectForAccessCode(parsed.accessCode);
+  if (!subject) {
+    return approvalPage(parsed.params, "접근 코드가 올바르지 않습니다.");
   }
 
   const now = nowSeconds();
@@ -264,6 +276,7 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
     redirectUri: parsed.params.redirectUri,
     resource: parsed.params.resource,
     scope: parsed.params.scope,
+    sub: subject,
     codeChallenge: parsed.params.codeChallenge,
     iat: now,
     exp: now + AUTH_CODE_TTL_SECONDS,
@@ -276,13 +289,13 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
   return Response.redirect(redirect.toString(), 303);
 }
 
-async function issueTokens(resource: string, scope: string, clientId: string): Promise<Response> {
+async function issueTokens(resource: string, scope: string, clientId: string, subject: string): Promise<Response> {
   const now = nowSeconds();
   const accessPayload: AccessTokenPayload = {
     typ: "access_token",
     aud: resource,
     scope,
-    sub: "gyuniverse-projects-team",
+    sub: subject,
     iat: now,
     exp: now + ACCESS_TOKEN_TTL_SECONDS,
   };
@@ -291,7 +304,7 @@ async function issueTokens(resource: string, scope: string, clientId: string): P
     aud: resource,
     scope,
     clientId,
-    sub: "gyuniverse-projects-team",
+    sub: subject,
     iat: now,
     exp: now + REFRESH_TOKEN_TTL_SECONDS,
   };
@@ -326,6 +339,7 @@ async function handleAuthorizationCode(form: FormData): Promise<Response> {
   if (payload.clientId !== clientId) return tokenError("invalid_grant", "client_id mismatch.");
   if (payload.redirectUri !== redirectUri) return tokenError("invalid_grant", "redirect_uri mismatch.");
   if (payload.resource !== resource) return tokenError("invalid_grant", "resource mismatch.");
+  if (!payload.sub) return tokenError("invalid_grant", "Authorization code subject is missing.");
 
   const actualChallenge = await sha256Base64Url(codeVerifier);
   if (actualChallenge !== payload.codeChallenge) return tokenError("invalid_grant", "PKCE verification failed.");
@@ -333,7 +347,7 @@ async function handleAuthorizationCode(form: FormData): Promise<Response> {
     return tokenError("invalid_grant", "Authorization code has already been used.");
   }
 
-  return issueTokens(payload.resource, payload.scope, payload.clientId);
+  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub);
 }
 
 async function handleRefreshToken(form: FormData): Promise<Response> {
@@ -349,9 +363,10 @@ async function handleRefreshToken(form: FormData): Promise<Response> {
   if (payload.exp <= nowSeconds()) return tokenError("invalid_grant", "Refresh token expired.");
   if (payload.clientId !== clientId) return tokenError("invalid_grant", "client_id mismatch.");
   if (payload.aud !== resource) return tokenError("invalid_grant", "resource mismatch.");
+  if (!payload.sub) return tokenError("invalid_grant", "Refresh token subject is missing.");
   if (!scopeIsAllowed(payload.scope)) return tokenError("invalid_scope", "Token scope is no longer enabled.");
 
-  return issueTokens(payload.aud, payload.scope, payload.clientId);
+  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub);
 }
 
 export async function tokenOAuth(request: Request): Promise<Response> {

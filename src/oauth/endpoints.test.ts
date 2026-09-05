@@ -16,6 +16,7 @@ import {
   signEnvelope,
   type AuthorizationCodePayload,
   nowSeconds,
+  oauthAccessTokenPayload,
 } from "./stateless.js";
 
 function withEnv(values: Record<string, string | undefined>, fn: () => Promise<void> | void) {
@@ -91,7 +92,7 @@ test("dynamic client registration accepts ChatGPT callback and rejects arbitrary
   });
 });
 
-test("authorization code token exchange verifies PKCE and rejects replay", async () => {
+test("authorization code token exchange preserves individual subject and rejects replay", async () => {
   await withEnv(
     {
       PUBLIC_BASE_URL: "https://projects.example.test",
@@ -108,6 +109,7 @@ test("authorization code token exchange verifies PKCE and rejects replay", async
         redirectUri: "https://chatgpt.com/connector_platform_oauth_redirect",
         resource: canonicalMcpResource(),
         scope: OAUTH_READ_SCOPE,
+        sub: "user:test",
         codeChallenge: challenge,
         iat: now,
         exp: now + 120,
@@ -131,6 +133,8 @@ test("authorization code token exchange verifies PKCE and rejects replay", async
       const token = await first.json() as { access_token: string; scope: string };
       assert.match(token.access_token, /^gypa\./);
       assert.equal(token.scope, OAUTH_READ_SCOPE);
+      const payload = await oauthAccessTokenPayload(token.access_token);
+      assert.equal(payload?.sub, "user:test");
 
       const replay = await tokenOAuth(new Request("https://projects.example.test/oauth/token", {
         method: "POST",
@@ -141,7 +145,6 @@ test("authorization code token exchange verifies PKCE and rejects replay", async
       const replayBody = await replay.json() as { error: string };
       assert.equal(replayBody.error, "invalid_grant");
 
-      // Keep the singleton referenced so test bundlers do not tree-shake replay semantics.
       assert.ok(authorizationCodeReplayStore);
     },
   );

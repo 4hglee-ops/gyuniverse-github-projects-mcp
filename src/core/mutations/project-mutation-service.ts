@@ -24,13 +24,14 @@ export class ProjectMutationService {
   constructor(private readonly options: ProjectMutationServiceOptions) {}
 
   async addProjectItem(projectId: string, contentId: string): Promise<unknown> {
-    this.options.writePolicy.authorize({ operation: "add_project_item", projectId });
+    const decision = this.options.writePolicy.authorize({ operation: "add_project_item", projectId });
 
     try {
       const result = await addItemToProject(this.options.client, projectId, contentId);
       this.options.auditService.record({
         operation: "add_project_item",
         outcome: "success",
+        actorId: decision.actorId,
         projectId,
         projectOwner: null,
         projectNumber: null,
@@ -46,6 +47,7 @@ export class ProjectMutationService {
     } catch (error) {
       this.options.auditService.recordFailure({
         operation: "add_project_item",
+        actorId: decision.actorId,
         projectId,
         projectOwner: null,
         projectNumber: null,
@@ -65,7 +67,7 @@ export class ProjectMutationService {
     fieldId: string,
     value: ProjectFieldValue,
   ): Promise<unknown> {
-    this.options.writePolicy.authorize({ operation: "update_project_item_field", projectId });
+    const decision = this.options.writePolicy.authorize({ operation: "update_project_item_field", projectId });
 
     try {
       const result = await updateProjectItemField(
@@ -78,6 +80,7 @@ export class ProjectMutationService {
       this.options.auditService.record({
         operation: "update_project_item_field",
         outcome: "success",
+        actorId: decision.actorId,
         projectId,
         projectOwner: null,
         projectNumber: null,
@@ -93,6 +96,7 @@ export class ProjectMutationService {
     } catch (error) {
       this.options.auditService.recordFailure({
         operation: "update_project_item_field",
+        actorId: decision.actorId,
         projectId,
         projectOwner: null,
         projectNumber: null,

@@ -14,6 +14,7 @@ export interface AuthenticatedPrincipal {
   githubLogin?: string | null;
   role: ProjectRole;
   permissions: ProjectPermission[];
+  projectIds: string[];
   source: "oauth" | "local" | "system";
 }
 
@@ -49,6 +50,7 @@ export function principalForRole(
     id,
     role,
     permissions: permissionsForRole(role),
+    projectIds: [...new Set(options.projectIds ?? [])],
     displayName: options.displayName ?? null,
     githubLogin: options.githubLogin ?? null,
     source: options.source ?? "system",
@@ -60,4 +62,11 @@ export function principalHasPermission(
   permission: ProjectPermission,
 ): boolean {
   return Boolean(principal?.permissions.includes(permission));
+}
+
+export function principalHasProject(
+  principal: AuthenticatedPrincipal | null | undefined,
+  projectId: string,
+): boolean {
+  return Boolean(principal?.projectIds.includes(projectId));
 }

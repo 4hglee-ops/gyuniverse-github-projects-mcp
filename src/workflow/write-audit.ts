@@ -5,6 +5,7 @@ export interface WriteAuditEntry {
   at: string;
   operation: string;
   outcome: WriteAuditOutcome;
+  actorId: string | null;
   projectId: string | null;
   projectOwner: string | null;
   projectNumber: number | null;
@@ -17,8 +18,9 @@ export interface WriteAuditEntry {
   errorCode: string | null;
 }
 
-export interface RecordWriteAuditInput extends Omit<WriteAuditEntry, "id" | "at"> {
+export interface RecordWriteAuditInput extends Omit<WriteAuditEntry, "id" | "at" | "actorId"> {
   at?: string;
+  actorId?: string | null;
 }
 
 function errorCodeFrom(message: string): string | null {
@@ -52,6 +54,7 @@ export class WriteAuditLog {
   record(input: RecordWriteAuditInput): WriteAuditEntry {
     const entry: WriteAuditEntry = {
       ...input,
+      actorId: input.actorId ?? null,
       id: `write-${++this.sequence}`,
       at: input.at ?? new Date().toISOString(),
     };

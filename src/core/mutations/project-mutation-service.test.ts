@@ -4,6 +4,7 @@ import test from "node:test";
 import type { AppConfig } from "../../config.js";
 import { GitHubGraphQlClient } from "../../github/graphql-client.js";
 import { AuditService } from "../audit/audit-service.js";
+import { principalForRole } from "../identity/principal.js";
 import { WritePolicy } from "../policy/write-policy.js";
 import { ProjectMutationService } from "./project-mutation-service.js";
 
@@ -27,15 +28,16 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
   };
 }
 
-test("addProjectItem authorizes, mutates, and records one audit entry", async () => {
+test("addProjectItem authorizes, mutates, and records actor-aware audit", async () => {
   const client = new StubGraphQlClient((query) => {
     assert.match(query, /addProjectV2ItemById/);
     return { addProjectV2ItemById: { item: { id: "PVTI_1", type: "ISSUE" } } };
   });
   const audit = new AuditService(20);
+  const actor = principalForRole("user:member", "member", { projectIds: ["PVT_allowed"] });
   const service = new ProjectMutationService({
     client,
-    writePolicy: new WritePolicy(config()),
+    writePolicy: new WritePolicy(config(), actor),
     auditService: audit,
   });
 
@@ -45,6 +47,7 @@ test("addProjectItem authorizes, mutates, and records one audit entry", async ()
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.operation, "add_project_item");
   assert.equal(entries[0]?.outcome, "success");
+  assert.equal(entries[0]?.actorId, "user:member");
 });
 
 test("write policy failure prevents mutation", async () => {
@@ -84,4 +87,5 @@ test("mutation failures are normalized into shared audit records", async () => {
   const [entry] = audit.list().entries;
   assert.equal(entry?.outcome, "failed");
   assert.equal(entry?.errorCode, "WRITE_FAILED");
+  assert.equal(entry?.actorId, null);
 });

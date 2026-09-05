@@ -32,12 +32,13 @@ test("keeps a bounded newest-first audit history", () => {
 
 test("filters by project and item without storing secrets or arbitrary payloads", () => {
   const log = new WriteAuditLog();
-  log.record({ ...base, outcome: "success" });
+  log.record({ ...base, outcome: "success", actorId: "user:member" });
   log.record({ ...base, outcome: "success", projectId: "PVT_OTHER", itemId: "PVTI_OTHER" });
 
   assert.equal(log.list({ projectId: "PVT_PROJECT" }).length, 1);
   assert.equal(log.list({ itemId: "PVTI_OTHER" }).length, 1);
   assert.deepEqual(Object.keys(log.list()[0] ?? {}).sort(), [
+    "actorId",
     "afterValue",
     "at",
     "beforeValue",
@@ -53,12 +54,14 @@ test("filters by project and item without storing secrets or arbitrary payloads"
     "requestedValue",
     "verified",
   ]);
+  assert.equal(log.list({ projectId: "PVT_PROJECT" })[0]?.actorId, "user:member");
 });
 
 test("classifies domain failure codes without recording error messages", () => {
   const failure = auditFailureFromError(
     {
       operation: "update_priority",
+      actorId: "user:member",
       projectId: "PVT_PROJECT",
       projectOwner: "gyuniverse-hq",
       projectNumber: 2,
@@ -73,5 +76,6 @@ test("classifies domain failure codes without recording error messages", () => {
 
   assert.equal(failure.outcome, "failed");
   assert.equal(failure.errorCode, "PROJECT_FIELD_OPTION_NOT_FOUND");
+  assert.equal(failure.actorId, "user:member");
   assert.equal("message" in failure, false);
 });

@@ -20,6 +20,7 @@ export interface AuthorizationCodePayload {
   redirectUri: string;
   resource: string;
   scope: string;
+  sub: string;
   codeChallenge: string;
   iat: number;
   exp: number;
@@ -29,7 +30,7 @@ export interface AccessTokenPayload {
   typ: "access_token";
   aud: string;
   scope: string;
-  sub: "gyuniverse-projects-team";
+  sub: string;
   iat: number;
   exp: number;
 }
@@ -39,7 +40,7 @@ export interface RefreshTokenPayload {
   aud: string;
   scope: string;
   clientId: string;
-  sub: "gyuniverse-projects-team";
+  sub: string;
   iat: number;
   exp: number;
 }

@@ -1,7 +1,11 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { type AppConfig, loadConfig } from "../config.js";
-import { principalForRole } from "../core/identity/principal.js";
+import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
+import {
+  type AuthenticatedPrincipal,
+  principalForRole,
+} from "../core/identity/principal.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { buildMcpServer } from "../mcp/build-server.js";
 import {
@@ -12,6 +16,8 @@ import {
   publicBaseUrl,
   scopeIncludes,
 } from "../oauth/stateless.js";
+
+const LEGACY_TEAM_SUBJECT = "gyuniverse-projects-team";
 
 function unauthorized(): Response {
   const metadata = `${publicBaseUrl()}/.well-known/oauth-protected-resource`;
@@ -32,6 +38,29 @@ export function configForRemoteScope(config: AppConfig, scope: string): AppConfi
   };
 }
 
+export function resolveRemotePrincipal(
+  subject: string,
+  scope: string,
+  config: AppConfig,
+  registry = OAuthIdentityRegistry.fromEnvironment(),
+): AuthenticatedPrincipal | null {
+  const individual = registry.resolvePrincipal(subject);
+  if (individual) return individual;
+
+  if (subject !== LEGACY_TEAM_SUBJECT) return null;
+  return scopeIncludes(scope, OAUTH_WRITE_SCOPE)
+    ? principalForRole(subject, "admin", {
+        source: "oauth",
+        displayName: "Legacy team OAuth principal",
+        projectIds: config.allowedProjectIds,
+      })
+    : principalForRole(subject, "viewer", {
+        source: "oauth",
+        displayName: "Legacy team OAuth principal",
+        projectIds: config.allowedProjectIds,
+      });
+}
+
 export async function handleRemoteMcpRequest(
   request: Request,
   options?: {
@@ -48,14 +77,8 @@ export async function handleRemoteMcpRequest(
   const baseConfig = options?.config ?? loadConfig();
   const effectiveConfig = configForRemoteScope(baseConfig, access.scope);
   const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
-
-  // M7 first slice: preserve the current shared-team OAuth subject while making
-  // principal/permission checks real at the Shared Core boundary. A write-scoped
-  // legacy team token keeps the pre-M7 write surface for compatibility. Individual
-  // subjects and per-user roles replace this shared principal in the next M7 slice.
-  const principal = scopeIncludes(access.scope, OAUTH_WRITE_SCOPE)
-    ? principalForRole(access.sub, "admin", { source: "oauth", displayName: "Legacy team OAuth principal" })
-    : principalForRole(access.sub, "viewer", { source: "oauth", displayName: "Legacy team OAuth principal" });
+  const principal = resolveRemotePrincipal(access.sub, access.scope, effectiveConfig);
+  if (!principal) return unauthorized();
 
   const handler = createMcpHandler(() => buildMcpServer({
     config: effectiveConfig,

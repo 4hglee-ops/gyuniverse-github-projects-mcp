@@ -15,6 +15,10 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
   };
 }
 
+function principal(id: string, role: "admin" | "member" | "viewer") {
+  return principalForRole(id, role, { projectIds: ["PVT_allowed"] });
+}
+
 test("authorize preserves the existing global gate and explicit Project allowlist", () => {
   const policy = new WritePolicy(config());
   const decision = policy.authorize({ operation: "update_status", projectId: "PVT_allowed" });
@@ -27,7 +31,7 @@ test("authorize preserves the existing global gate and explicit Project allowlis
 });
 
 test("authorize fails closed when the global write gate is disabled", () => {
-  const policy = new WritePolicy(config({ writeEnabled: false }), principalForRole("admin-1", "admin"));
+  const policy = new WritePolicy(config({ writeEnabled: false }), principal("admin-1", "admin"));
   assert.throws(
     () => policy.authorize({ operation: "update_priority", projectId: "PVT_allowed" }),
     /write tools are disabled/,
@@ -35,15 +39,24 @@ test("authorize fails closed when the global write gate is disabled", () => {
 });
 
 test("authorize fails closed when no explicit Project allowlist exists", () => {
-  const policy = new WritePolicy(config({ allowedProjectIds: [] }), principalForRole("admin-1", "admin"));
+  const policy = new WritePolicy(config({ allowedProjectIds: [] }), principal("admin-1", "admin"));
   assert.throws(
     () => policy.authorize({ operation: "add_project_item", projectId: "PVT_allowed" }),
     /require GITHUB_PROJECTS_ALLOWED_PROJECT_IDS/,
   );
 });
 
+test("principal must be assigned to the target Project", () => {
+  const outsider = principalForRole("member-2", "member", { projectIds: ["PVT_other"] });
+  const policy = new WritePolicy(config(), outsider);
+  assert.throws(
+    () => policy.authorize({ operation: "update_status", projectId: "PVT_allowed" }),
+    /PROJECT_MEMBERSHIP_DENIED/,
+  );
+});
+
 test("viewer cannot invoke write operations when a principal is enforced", () => {
-  const policy = new WritePolicy(config(), principalForRole("viewer-1", "viewer"));
+  const policy = new WritePolicy(config(), principal("viewer-1", "viewer"));
   assert.throws(
     () => policy.authorize({ operation: "update_status", projectId: "PVT_allowed" }),
     /PERMISSION_DENIED/,
@@ -51,12 +64,13 @@ test("viewer cannot invoke write operations when a principal is enforced", () =>
 });
 
 test("member can update status but cannot use generic field mutation", () => {
-  const policy = new WritePolicy(config(), principalForRole("member-1", "member"));
+  const policy = new WritePolicy(config(), principal("member-1", "member"));
   const decision = policy.authorize({ operation: "update_status", projectId: "PVT_allowed" });
   assert.equal(decision.actorId, "member-1");
   assert.equal(decision.identityEnforced, true);
   assert.equal(decision.permission, "item.update_status");
   assert.ok(decision.controls.includes("authenticated-principal"));
+  assert.ok(decision.controls.includes("project-membership"));
 
   assert.throws(
     () => policy.authorize({ operation: "update_project_item_field", projectId: "PVT_allowed" }),
@@ -65,7 +79,7 @@ test("member can update status but cannot use generic field mutation", () => {
 });
 
 test("admin retains the current generic write surface", () => {
-  const policy = new WritePolicy(config(), principalForRole("admin-1", "admin"));
+  const policy = new WritePolicy(config(), principal("admin-1", "admin"));
   assert.doesNotThrow(() =>
     policy.authorize({ operation: "update_project_item_field", projectId: "PVT_allowed" }),
   );

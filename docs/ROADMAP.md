@@ -115,18 +115,22 @@ M6 rules:
 ## M7 ◐
 Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
 
-### Current slice
+### Completed / current
 - [x] Add `AuthenticatedPrincipal`, `ProjectRole`, and `ProjectPermission` models
 - [x] Define Admin / Member / Viewer permission matrix
 - [x] Add `IdentityPolicy` permission checks
 - [x] Make `WritePolicy` principal-aware while retaining existing server write gate and Project allowlist
 - [x] Pass OAuth request principal into the Shared Core write boundary
-- [x] Preserve legacy shared-team OAuth compatibility during the migration
-- [ ] Replace shared-team OAuth subject with individual subjects
-- [ ] Add per-user role / membership resolution
-- [ ] Propagate actor identity into mutation audit records
+- [x] Add `MCP_OAUTH_IDENTITIES_JSON` registry for individual OAuth subjects, roles, GitHub login, and Project memberships
+- [x] Bind individual access codes to stable OAuth subjects during authorization
+- [x] Resolve remote principals from individual subject on each request so role/membership changes take effect without changing adapter contracts
+- [x] Enforce per-principal Project membership before writes
+- [x] Propagate actor identity into mutation audit records
+- [x] Preserve legacy shared-team OAuth compatibility during migration
 - [ ] Make authenticated identity authoritative for `get_my_work`
+- [ ] Apply principal Project membership to high-level read access
 - [ ] Remove legacy shared-team write authorization after migration
+- [ ] Complete M7 validation with at least one Admin, Member, and Viewer identity
 
 Target role shape:
 - Admin / PM: broad Project read/write within policy
@@ -137,6 +141,11 @@ Current permission baseline:
 - Admin: Project read/write + add item + generic field/status/priority writes
 - Member: Project read/write + add item + status/priority writes; no unrestricted generic field mutation
 - Viewer: Project read-only
+
+Individual OAuth identities are configured server-side. Access codes are credentials and
+must never be committed, logged, or pasted into project documentation. The registry
+stores only the configured identity model at runtime; tokens carry the stable subject,
+and role/Project membership are resolved again from the server registry on requests.
 
 Multiple authorized users may receive write permissions. The server credential remains
 the backend capability; authenticated Identity / ACL decides which user may invoke

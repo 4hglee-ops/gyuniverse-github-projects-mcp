@@ -29,7 +29,7 @@ async function runNamedUpdate(
 ) {
   const project = await options.resolveProject(input.owner, input.number);
   const projectId = options.projectIdOf(project);
-  options.writePolicy.authorize({ operation: input.operation, projectId });
+  const decision = options.writePolicy.authorize({ operation: input.operation, projectId });
 
   try {
     const result = await updateProjectSingleSelectByName(options.client, {
@@ -44,6 +44,7 @@ async function runNamedUpdate(
     const audit = options.auditService.record({
       operation: input.operation,
       outcome: result.changed ? "success" : "no_change",
+      actorId: decision.actorId,
       projectId,
       projectOwner: input.owner,
       projectNumber: input.number,
@@ -60,6 +61,7 @@ async function runNamedUpdate(
   } catch (error) {
     options.auditService.recordFailure({
       operation: input.operation,
+      actorId: decision.actorId,
       projectId,
       projectOwner: input.owner,
       projectNumber: input.number,
@@ -97,7 +99,7 @@ export function registerWorkflowWriteTools(options: RegisterWorkflowWriteToolsOp
   options.server.registerTool(
     "list_github_project_write_audit_log",
     {
-      description: "List recent in-process GitHub Project write audit records. Records contain bounded operation metadata and verification results, not tokens or raw mutation payloads.",
+      description: "List recent in-process GitHub Project write audit records. Records contain bounded operation metadata, actor identity, and verification results, not tokens or raw mutation payloads.",
       inputSchema: z.object({ limit: z.number().int().min(1).max(200).default(50), projectId: z.string().min(1).optional(), itemId: z.string().min(1).optional() }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
