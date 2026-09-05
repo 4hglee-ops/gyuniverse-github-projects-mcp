@@ -7,7 +7,7 @@
 | M3 Remote MCP + OAuth | Complete | HTTP / OAuth / PKCE / Vercel / Upstash |
 | M3 ChatGPT Live Read | Complete | Connector OAuth + real Project read |
 | M4 Project Operating Foundation | Complete | Priority / Views / Native automation / no-sprint continuous flow |
-| M5 Shared Core | In progress | Separate transport from business logic |
+| M5 Shared Core | Complete | Separate transport from business logic |
 | M6 High-level Read | Planned | Brief / My Work / Backlog / Review / Blockers |
 | M7 Identity Foundation | Planned | Individual identity + permission model |
 | M8 High-level Write | Planned | Semantic write + idempotency + verify + audit |
@@ -49,30 +49,47 @@ both phases.
 
 See `M4_PROJECT_OPERATING_FOUNDATION.md` and `M4_PROJECT_UI_SETUP.md`.
 
-## M5 ◐
-Extract shared services incrementally without rewriting the working MCP adapter.
+## M5 ✅
+Shared Core extraction was completed incrementally without rewriting the working MCP
+adapter.
 
-### Current slice
-- [x] Add `ProjectService` shared-core boundary
-- [x] Centralize Project owner / node-ID allowlist checks for migrated reads
-- [x] Route core Project metadata / fields / items / snapshot MCP reads through `ProjectService`
-- [x] Add regression tests for ProjectService allowlist behavior
-- [ ] Extract `SnapshotService` / workflow analysis boundary
-- [ ] Extract `WorkItemService`
-- [ ] Extract shared `WritePolicy` / mutation boundary
-- [ ] Move audit ownership behind shared core
-- [ ] Keep MCP adapter transport-only as extraction progresses
+### Completed boundaries
+- [x] `ProjectService`: Project owner / node-ID allowlist boundary and core Project reads
+- [x] `SnapshotService`: normalized snapshot access and bounded coverage metadata
+- [x] `WorkflowService`: state-gap, reconciliation, and brief-context analysis contracts
+- [x] `WorkItemService`: Issue/PR URL resolution and Project membership lookup
+- [x] `WritePolicy`: shared server-level mutation authorization boundary
+- [x] `AuditService`: shared mutation audit ownership
+- [x] `ProjectMutationService`: generic Project item add/update mutation orchestration
+- [x] Route migrated MCP read, analysis, resolver, and generic mutation paths through Shared Core
+- [x] Preserve existing MCP tool names and external contracts during migration
+- [x] Preserve write gates, explicit Project allowlist, verification, and audit behavior
+- [x] Keep individual identity / ACL explicitly deferred to M7 instead of treating it as complete
 
-Target shared services:
-- ProjectService
-- WorkItemService
-- SnapshotService
-- WorkflowService
-- WritePolicy
-- AuditService
+Current architecture:
 
-M5 rule: use a strangler/incremental extraction. Do not build REST -> MCP -> GitHub or
-MCP -> REST -> GitHub. MCP and future REST adapters must call the same Shared Core.
+```text
+MCP adapter
+   ├─ ProjectService
+   ├─ SnapshotService
+   ├─ WorkflowService
+   ├─ WorkItemService
+   └─ ProjectMutationService
+          ├─ WritePolicy
+          └─ AuditService
+
+future REST / GPT Actions adapter
+   └──────────── uses the same Shared Core ────────────┘
+```
+
+M5 rule remains authoritative: do not build REST -> MCP -> GitHub or MCP -> REST -> GitHub.
+Both adapters call Shared Core directly.
+
+Remaining intentionally later:
+- individual Identity / Membership / Role / Permission: M7
+- high-level semantic write orchestration and idempotency: M8
+- REST / GPT Actions transport adapter: M9
+- durable audit/checkpoint persistence: M10
 
 ## M6
 High-level reads:

@@ -3,13 +3,13 @@ import { z } from "zod";
 
 import { type AppConfig } from "../config.js";
 import { AuditService } from "../core/audit/audit-service.js";
+import { ProjectMutationService } from "../core/mutations/project-mutation-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
 import { SnapshotService } from "../core/snapshots/snapshot-service.js";
 import { WorkItemService } from "../core/work-items/work-item-service.js";
 import { WorkflowService } from "../core/workflow/workflow-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
-import { addItemToProject, updateProjectItemField } from "../github/projects.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
 import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
 
@@ -31,6 +31,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   const workItemService = new WorkItemService({ config, client, projects: projectService });
   const writePolicy = new WritePolicy(config);
   const auditService = new AuditService(200);
+  const mutationService = new ProjectMutationService({ client, writePolicy, auditService });
   const resolveProject = projectService.resolveProject.bind(projectService);
 
   registerCheckpointTools({ server, client, resolveProject, json });
@@ -156,17 +157,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       inputSchema: z.object({ projectId: z.string().min(1), contentId: z.string().min(1) }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ projectId, contentId }) => {
-      writePolicy.authorize({ operation: "add_project_item", projectId });
-      try {
-        const result = await addItemToProject(client, projectId, contentId);
-        auditService.record({ operation: "add_project_item", outcome: "success", projectId, projectOwner: null, projectNumber: null, itemId: null, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: null });
-        return json(result);
-      } catch (error) {
-        auditService.recordFailure({ operation: "add_project_item", projectId, projectOwner: null, projectNumber: null, itemId: null, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null }, error);
-        throw error;
-      }
-    },
+    async ({ projectId, contentId }) => json(await mutationService.addProjectItem(projectId, contentId)),
   );
 
   const fieldValueSchema = z.object({
@@ -181,17 +172,9 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       inputSchema: z.object({ projectId: z.string().min(1), itemId: z.string().min(1), fieldId: z.string().min(1), value: fieldValueSchema }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ projectId, itemId, fieldId, value }) => {
-      writePolicy.authorize({ operation: "update_project_item_field", projectId });
-      try {
-        const result = await updateProjectItemField(client, projectId, itemId, fieldId, value);
-        auditService.record({ operation: "update_project_item_field", outcome: "success", projectId, projectOwner: null, projectNumber: null, itemId, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: null });
-        return json(result);
-      } catch (error) {
-        auditService.recordFailure({ operation: "update_project_item_field", projectId, projectOwner: null, projectNumber: null, itemId, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null }, error);
-        throw error;
-      }
-    },
+    async ({ projectId, itemId, fieldId, value }) => json(
+      await mutationService.updateProjectItemField(projectId, itemId, fieldId, value),
+    ),
   );
 
   return server;
