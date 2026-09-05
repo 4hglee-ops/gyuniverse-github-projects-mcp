@@ -81,6 +81,48 @@ test("unauthenticated MCP requests receive an OAuth resource challenge before co
   );
 });
 
+test("OAuth authorize diagnostics distinguish omitted scope from explicit scope without logging credentials", async () => {
+  await withEnv(
+    {
+      PUBLIC_BASE_URL: "https://projects.example.test",
+      MCP_OAUTH_WRITE_ENABLED: "true",
+    },
+    async () => {
+      const entries: unknown[][] = [];
+      const before = console.info;
+      console.info = (...args: unknown[]) => { entries.push(args); };
+      try {
+        const omitted = await handleRemoteHttpRequest(new Request(
+          "https://projects.example.test/oauth/authorize?response_type=code",
+        ));
+        assert.equal(omitted.status, 400);
+
+        const explicit = await handleRemoteHttpRequest(new Request(
+          "https://projects.example.test/oauth/authorize?response_type=code&scope=projects%3Aread%20projects%3Awrite",
+        ));
+        assert.equal(explicit.status, 400);
+      } finally {
+        console.info = before;
+      }
+
+      assert.equal(entries.length, 2);
+      assert.equal(entries[0]?.[0], "oauth_authorize_scope");
+      assert.deepEqual(entries[0]?.[1], {
+        method: "GET",
+        scopeProvided: false,
+        normalizedScope: "projects:read",
+      });
+      assert.deepEqual(entries[1]?.[1], {
+        method: "GET",
+        scopeProvided: true,
+        normalizedScope: "projects:read projects:write",
+      });
+      assert.equal(JSON.stringify(entries).includes("client_id"), false);
+      assert.equal(JSON.stringify(entries).includes("access_code"), false);
+    },
+  );
+});
+
 test("unknown routes and unsupported methods fail closed", async () => {
   const missing = await handleRemoteHttpRequest(new Request("https://projects.example.test/nope"));
   assert.equal(missing.status, 404);

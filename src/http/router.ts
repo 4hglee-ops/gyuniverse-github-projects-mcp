@@ -5,6 +5,7 @@ import {
   registerOAuthClient,
   tokenOAuth,
 } from "../oauth/endpoints.js";
+import { normalizeScope } from "../oauth/stateless.js";
 import { handleRemoteMcpRequest } from "./remote-mcp.js";
 
 function metadataResponse(value: Record<string, unknown>): Response {
@@ -13,6 +14,36 @@ function metadataResponse(value: Record<string, unknown>): Response {
       "Cache-Control": "public, max-age=300",
     },
   });
+}
+
+async function logOAuthScopeDiagnostic(request: Request): Promise<void> {
+  try {
+    if (request.method === "GET") {
+      const url = new URL(request.url);
+      const rawScope = url.searchParams.get("scope");
+      console.info("oauth_authorize_scope", {
+        method: "GET",
+        scopeProvided: rawScope !== null,
+        normalizedScope: normalizeScope(rawScope),
+      });
+      return;
+    }
+
+    if (request.method === "POST") {
+      const form = await request.clone().formData();
+      const rawScope = form.has("scope") ? String(form.get("scope") ?? "") : null;
+      console.info("oauth_authorize_scope", {
+        method: "POST",
+        scopeProvided: rawScope !== null,
+        normalizedScope: normalizeScope(rawScope),
+      });
+    }
+  } catch {
+    console.info("oauth_authorize_scope", {
+      method: request.method,
+      diagnostic: "unavailable",
+    });
+  }
 }
 
 export async function handleRemoteHttpRequest(request: Request): Promise<Response> {
@@ -32,7 +63,10 @@ export async function handleRemoteHttpRequest(request: Request): Promise<Respons
   }
 
   if (url.pathname === "/oauth/register") return registerOAuthClient(request);
-  if (url.pathname === "/oauth/authorize") return authorizeOAuth(request);
+  if (url.pathname === "/oauth/authorize") {
+    await logOAuthScopeDiagnostic(request);
+    return authorizeOAuth(request);
+  }
   if (url.pathname === "/oauth/token") return tokenOAuth(request);
 
   if (url.pathname === "/mcp") {
