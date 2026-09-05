@@ -72,6 +72,8 @@ const FIELD_NODES = `
     ... on ProjectV2IterationField {
       id name dataType
       configuration {
+        duration
+        startDay
         iterations { id title startDate duration }
         completedIterations { id title startDate duration }
       }

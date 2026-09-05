@@ -6,7 +6,7 @@
 | M2 Workflow Intelligence | Complete | Resolver / Gap / Reconciliation / Checkpoint / Audit |
 | M3 Remote MCP + OAuth | Complete | HTTP / OAuth / PKCE / Vercel / Upstash |
 | M3 ChatGPT Live Read | Complete | Connector OAuth + real Project read |
-| M4 Project Operating Foundation | Next | Priority / Iteration / Views / Native automation |
+| M4 Project Operating Foundation | In progress | Priority / Iteration / Views / Native automation |
 | M5 Shared Core | Planned | Separate transport from business logic |
 | M6 High-level Read | Planned | Brief / My Work / Backlog / Review / Blockers |
 | M7 Identity Foundation | Planned | Individual identity + permission model |
@@ -15,14 +15,15 @@
 | M10 Advanced Governance | Planned | Durable state / Bulk / Sub-issue / Dependency |
 
 ## M4
-- Priority: P0 / P1 / P2 / P3
-- Iteration: Current Sprint
-- Views: Backlog / Current Sprint / My Work / Review Queue / Workstream
-- Native automation:
-  - Issue closed -> Done
-  - PR merged -> Done
-  - PR ready for review -> In Review
-  - Issue/PR auto-add -> Project #2
+- [x] Inspect Project #2 and preserve Priority P0 / P1 / P2 / P3
+- [x] Add safe inspection, dry-run, API apply, and verification code
+- [ ] Select Iteration cadence and first start date, then apply
+- [ ] Create/verify Backlog / Current Sprint / My Work / Review Queue / Workstream views
+- [ ] Enable/verify Issue closed -> Done and PR merged -> Done
+- [ ] Configure Issue/PR auto-add for the three source repositories
+- [ ] Install PR ready for review -> In Review in the three source repositories
+
+See `M4_PROJECT_OPERATING_FOUNDATION.md` and `M4_PROJECT_UI_SETUP.md`.
 
 ## M5
 Extract shared services incrementally:

@@ -12,6 +12,8 @@
     "smoke:read": "pnpm build && node dist/scripts/smoke-read.js",
     "smoke:http": "tsx src/scripts/smoke-http.ts",
     "smoke:update-single-select": "pnpm build && node dist/scripts/smoke-update-single-select.js",
+    "project:foundation:inspect": "tsx src/scripts/inspect-project-operating-foundation.ts",
+    "project:foundation:configure": "tsx src/scripts/configure-project-operating-foundation.ts",
     "start": "node dist/mcp/stdio.js",
     "start:http": "node dist/http/node-server.js",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",
