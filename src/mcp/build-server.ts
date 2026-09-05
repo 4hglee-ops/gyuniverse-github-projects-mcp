@@ -6,11 +6,13 @@ import { AuditService } from "../core/audit/audit-service.js";
 import { ProjectMutationService } from "../core/mutations/project-mutation-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
+import { HighLevelReadService } from "../core/reads/high-level-read-service.js";
 import { SnapshotService } from "../core/snapshots/snapshot-service.js";
 import { WorkItemService } from "../core/work-items/work-item-service.js";
 import { WorkflowService } from "../core/workflow/workflow-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
+import { registerHighLevelReadTools } from "./high-level-read-tools.js";
 import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
 
 export interface BuildServerOptions {
@@ -28,6 +30,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   const projectService = new ProjectService({ config, client });
   const snapshotService = new SnapshotService(projectService);
   const workflowService = new WorkflowService(snapshotService);
+  const highLevelReadService = new HighLevelReadService(snapshotService);
   const workItemService = new WorkItemService({ config, client, projects: projectService });
   const writePolicy = new WritePolicy(config);
   const auditService = new AuditService(200);
@@ -35,6 +38,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   const resolveProject = projectService.resolveProject.bind(projectService);
 
   registerCheckpointTools({ server, client, resolveProject, json });
+  registerHighLevelReadTools({ server, reads: highLevelReadService, json });
   registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, projectIdOf, json });
 
   server.registerTool(
