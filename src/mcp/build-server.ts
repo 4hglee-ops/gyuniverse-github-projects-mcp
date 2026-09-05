@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { type AppConfig } from "../config.js";
 import { AuditService } from "../core/audit/audit-service.js";
+import { ProjectChangeService } from "../core/changes/project-change-service.js";
 import { ProjectMutationService } from "../core/mutations/project-mutation-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
@@ -31,14 +32,15 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   const snapshotService = new SnapshotService(projectService);
   const workflowService = new WorkflowService(snapshotService);
   const highLevelReadService = new HighLevelReadService(snapshotService);
+  const changeService = new ProjectChangeService(snapshotService);
   const workItemService = new WorkItemService({ config, client, projects: projectService });
   const writePolicy = new WritePolicy(config);
   const auditService = new AuditService(200);
   const mutationService = new ProjectMutationService({ client, writePolicy, auditService });
   const resolveProject = projectService.resolveProject.bind(projectService);
 
-  registerCheckpointTools({ server, client, resolveProject, json });
-  registerHighLevelReadTools({ server, reads: highLevelReadService, json });
+  registerCheckpointTools({ server, changes: changeService, json });
+  registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, json });
   registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, projectIdOf, json });
 
   server.registerTool(

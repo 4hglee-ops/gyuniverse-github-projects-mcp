@@ -1,30 +1,19 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import { GitHubGraphQlClient } from "../github/graphql-client.js";
-import { getProjectSnapshot } from "../github/projects.js";
-import {
-  compareProjectStateCheckpoint,
-  createProjectStateCheckpoint,
-  ProjectCheckpointStore,
-  type ProjectSnapshotLike,
-} from "../workflow/checkpoint.js";
+import { ProjectChangeService } from "../core/changes/project-change-service.js";
 
 export interface RegisterCheckpointToolsOptions {
   server: McpServer;
-  client: GitHubGraphQlClient;
-  resolveProject: (owner: string, number: number) => Promise<unknown>;
+  changes: ProjectChangeService;
   json: (value: unknown) => { content: Array<{ type: "text"; text: string }> };
 }
 
 export function registerCheckpointTools({
   server,
-  client,
-  resolveProject,
+  changes,
   json,
 }: RegisterCheckpointToolsOptions): void {
-  const checkpoints = new ProjectCheckpointStore();
-
   server.registerTool(
     "create_github_project_state_checkpoint",
     {
@@ -36,24 +25,9 @@ export function registerCheckpointTools({
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ owner, number, first }) => {
-      await resolveProject(owner, number);
-      const snapshot = await getProjectSnapshot(client, owner, number, first) as ProjectSnapshotLike;
-      const checkpoint = createProjectStateCheckpoint(snapshot, {
-        owner,
-        projectNumber: number,
-        requestedItems: first,
-      });
-      checkpoints.set(checkpoint);
-      return json({
-        checkpoint,
-        persistence: {
-          kind: "process_local",
-          survivesServerRestart: false,
-          note: "The latest checkpoint is kept only in this MCP server process. Persistent storage is intentionally deferred until a later milestone requires it.",
-        },
-      });
-    },
+    async ({ owner, number, first }) => json(
+      await changes.captureBaseline(owner, number, first),
+    ),
   );
 
   server.registerTool(
@@ -68,36 +42,12 @@ export function registerCheckpointTools({
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ owner, number, first }) => {
-      await resolveProject(owner, number);
-      const checkpoint = checkpoints.get(owner, number);
-      if (!checkpoint) {
-        throw new Error(
-          `No process-local checkpoint exists for ${owner} Project #${number}. Create one first with create_github_project_state_checkpoint.`,
-        );
-      }
-
-      const snapshot = await getProjectSnapshot(client, owner, number, first) as ProjectSnapshotLike;
-      const current = createProjectStateCheckpoint(snapshot, {
-        owner,
-        projectNumber: number,
-        requestedItems: first,
-      });
-      const comparison = compareProjectStateCheckpoint(checkpoint, current);
-
+      const result = await changes.getChanges(owner, number, { first });
       return json({
-        comparison,
-        baseline: {
-          createdAt: checkpoint.createdAt,
-          sourceSnapshotAt: checkpoint.sourceSnapshotAt,
-          itemCount: checkpoint.itemCount,
-          coverage: checkpoint.coverage,
-        },
-        current: {
-          sourceSnapshotAt: current.sourceSnapshotAt,
-          itemCount: current.itemCount,
-          coverage: current.coverage,
-        },
-        checkpointReplaced: false,
+        comparison: result.comparison,
+        baseline: result.baseline,
+        current: result.current,
+        checkpointReplaced: result.checkpointReplaced,
       });
     },
   );

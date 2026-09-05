@@ -8,7 +8,7 @@
 | M3 ChatGPT Live Read | Complete | Connector OAuth + real Project read |
 | M4 Project Operating Foundation | Complete | Priority / Views / Native automation / no-sprint continuous flow |
 | M5 Shared Core | Complete | Separate transport from business logic |
-| M6 High-level Read | In progress | Brief / My Work / Backlog / Review / Blockers / Changes |
+| M6 High-level Read | Complete | Brief / My Work / Backlog / Review / Blockers / Changes |
 | M7 Identity Foundation | Planned | Individual identity + permission model |
 | M8 High-level Write | Planned | Semantic write + idempotency + verify + audit |
 | M9 REST / GPT Actions | Planned | Operator GPT read/write adapter |
@@ -91,9 +91,9 @@ Remaining intentionally later:
 - REST / GPT Actions transport adapter: M9
 - durable audit/checkpoint persistence: M10
 
-## M6 ◐
+## M6 ✅
 High-level semantic reads are implemented in Shared Core and exposed through thin MCP
-tools. Results stay evidence-based and preserve the snapshot coverage boundary.
+tools. Results stay evidence-based and preserve the snapshot/checkpoint coverage boundary.
 
 - [x] `get_project_brief`: workflow/priority counts plus active, review, unassigned, and explicit blocker focus
 - [x] `get_my_work`: assignee-focused work; explicit GitHub login until M7 identity exists
@@ -101,13 +101,16 @@ tools. Results stay evidence-based and preserve the snapshot coverage boundary.
 - [x] `get_review_queue`: items with Status = In Review
 - [x] `get_unassigned_work`: non-completed items with no assignee evidence
 - [x] `get_blockers`: explicit Blocked status/fields/reasons only; no blocker inference from ordinary workflow state
-- [ ] `get_project_changes`: checkpoint-backed semantic project changes
+- [x] `get_project_changes`: shared process-local checkpoint baseline plus semantic change groups
+- [x] Existing checkpoint create/compare tools and `get_project_changes` use the same `ProjectChangeService` baseline
 
 M6 rules:
 - do not infer Done from assignment, intention, or open PR state
 - do not infer a blocker merely from missing assignment or ordinary workflow status
 - preserve item URL/repository/number/status/priority/assignees as evidence
-- keep reads bounded by normalized snapshot coverage until pagination is expanded
+- keep snapshot reads bounded by normalized snapshot coverage until pagination is expanded
+- treat entered/left membership deltas as authoritative only when both checkpoint windows are complete
+- checkpoint storage remains process-local; durable persistence remains M10
 
 ## M7
 Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy

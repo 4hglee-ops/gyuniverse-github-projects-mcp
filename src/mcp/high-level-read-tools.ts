@@ -1,11 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
+import { ProjectChangeService } from "../core/changes/project-change-service.js";
 import { HighLevelReadService } from "../core/reads/high-level-read-service.js";
 
 interface RegisterHighLevelReadToolsOptions {
   server: McpServer;
   reads: HighLevelReadService;
+  changes: ProjectChangeService;
   json: (value: unknown) => { content: Array<{ type: "text"; text: string }> };
 }
 
@@ -16,7 +18,7 @@ const projectInput = z.object({
   includeArchived: z.boolean().default(false),
 });
 
-export function registerHighLevelReadTools({ server, reads, json }: RegisterHighLevelReadToolsOptions): void {
+export function registerHighLevelReadTools({ server, reads, changes, json }: RegisterHighLevelReadToolsOptions): void {
   server.registerTool(
     "get_project_brief",
     {
@@ -89,6 +91,23 @@ export function registerHighLevelReadTools({ server, reads, json }: RegisterHigh
     },
     async ({ owner, number, first, includeArchived }) => json(
       await reads.getBlockers(owner, number, { first, includeArchived }),
+    ),
+  );
+
+  server.registerTool(
+    "get_project_changes",
+    {
+      description: "Compare the current Project snapshot with the shared process-local baseline and return semantic change groups without replacing the baseline. Can initialize a missing baseline explicitly.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        number: z.number().int().min(1),
+        first: z.number().int().min(1).max(100).default(100),
+        initializeIfMissing: z.boolean().default(false),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ owner, number, first, initializeIfMissing }) => json(
+      await changes.getChanges(owner, number, { first, initializeIfMissing }),
     ),
   );
 }
