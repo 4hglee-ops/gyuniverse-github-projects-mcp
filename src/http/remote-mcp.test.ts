@@ -3,7 +3,11 @@ import test from "node:test";
 
 import type { AppConfig } from "../config.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
-import { configForRemoteScope, resolveRemotePrincipal } from "./remote-mcp.js";
+import {
+  configForRemoteScope,
+  oauthChallengeScope,
+  resolveRemotePrincipal,
+} from "./remote-mcp.js";
 
 const base: AppConfig = {
   githubToken: "test-token",
@@ -11,6 +15,38 @@ const base: AppConfig = {
   allowedProjectIds: ["PVT_PROJECT"],
   writeEnabled: true,
 };
+
+async function withEnv(
+  values: Record<string, string | undefined>,
+  fn: () => Promise<void> | void,
+): Promise<void> {
+  const before = new Map<string, string | undefined>();
+  for (const [key, value] of Object.entries(values)) {
+    before.set(key, process.env[key]);
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    await fn();
+  } finally {
+    for (const [key, value] of before) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test("OAuth challenge is read-only by default", async () => {
+  await withEnv({ MCP_OAUTH_WRITE_ENABLED: undefined }, () => {
+    assert.equal(oauthChallengeScope(), "projects:read");
+  });
+});
+
+test("OAuth challenge requests read and write when remote write OAuth is enabled", async () => {
+  await withEnv({ MCP_OAUTH_WRITE_ENABLED: "true" }, () => {
+    assert.equal(oauthChallengeScope(), "projects:read projects:write");
+  });
+});
 
 test("remote OAuth read scope forces GitHub writes off even when server write gate is on", () => {
   const effective = configForRemoteScope(base, "projects:read");

@@ -14,17 +14,24 @@ import {
   OAUTH_READ_SCOPE,
   OAUTH_WRITE_SCOPE,
   publicBaseUrl,
+  remoteWriteOauthEnabled,
   scopeIncludes,
 } from "../oauth/stateless.js";
 
 const LEGACY_TEAM_SUBJECT = "gyuniverse-projects-team";
+
+export function oauthChallengeScope(): string {
+  return remoteWriteOauthEnabled()
+    ? `${OAUTH_READ_SCOPE} ${OAUTH_WRITE_SCOPE}`
+    : OAUTH_READ_SCOPE;
+}
 
 function unauthorized(): Response {
   const metadata = `${publicBaseUrl()}/.well-known/oauth-protected-resource`;
   return new Response("Unauthorized", {
     status: 401,
     headers: {
-      "WWW-Authenticate": `Bearer realm="gyuniverse-github-projects-mcp", resource_metadata="${metadata}", scope="${OAUTH_READ_SCOPE}"`,
+      "WWW-Authenticate": `Bearer realm="gyuniverse-github-projects-mcp", resource_metadata="${metadata}", scope="${oauthChallengeScope()}"`,
       "Cache-Control": "no-store",
     },
   });
