@@ -29,19 +29,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Typecheck
-        id: typecheck
-        shell: bash
-        run: |
-          set -o pipefail
-          pnpm typecheck 2>&1 | tee typecheck.log
-
-      - name: Upload typecheck diagnostics
-        if: ${{ failure() && steps.typecheck.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: typecheck-diagnostics
-          path: typecheck.log
-          if-no-files-found: error
+        run: pnpm typecheck
 
       - name: Build
         run: pnpm build
