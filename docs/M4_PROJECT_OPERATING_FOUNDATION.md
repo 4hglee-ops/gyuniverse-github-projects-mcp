@@ -31,11 +31,12 @@ active iteration without a periodically edited date filter.
 | Priority | Compatible and preserved: P0, P1, P2, P3 |
 | Iteration | Missing |
 | REST field IDs | Readable |
-| Views/workflows | Current fine-grained PAT cannot read these GraphQL resources |
+| Views | Readable; existing Table, Kanban, and Roadmap views detected |
+| Workflow details | Current fine-grained PAT cannot read workflow nodes |
 
-The current permission limitation is fail-closed: the configure command will not
-create views until it can read both the existing views/workflows and the REST field
-IDs. This prevents duplicate or conflicting same-name views.
+View planning requires readable views and REST field IDs, which the current token
+provides. Workflow detail inspection is independent and reports its permission
+limitation without hiding readable view state.
 
 ## Supported automation boundary
 
@@ -83,7 +84,7 @@ pnpm project:foundation:configure -- --apply --sprint-days=14 --sprint-start=202
 ```
 
 Before applying, use a GitHub credential with organization Projects write access and
-enough access to read Project views/workflows. After applying, restore
+enough access to read Project views. After applying, restore
 `GITHUB_PROJECTS_WRITE_ENABLED=false` and reduce the credential to read-only if no
 more setup changes are planned.
 
@@ -111,6 +112,6 @@ more setup changes are planned.
 ## Remaining decisions
 
 1. Select the sprint duration and first start date.
-2. Provide a Project-write credential that can also read views/workflows.
+2. Provide a Project-write credential; the current token already reads views.
 3. Verify built-in workflows and auto-add filters in the Project UI.
 4. Install the ready-for-review Action in each source repository.
