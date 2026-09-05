@@ -29,6 +29,8 @@ The supported credential pairs are:
 
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
 - Vercel Marketplace aliases `KV_REST_API_URL` and `KV_REST_API_TOKEN`
+- namespaced Marketplace variables `MCP_REPLAY_KV_REST_API_URL` and
+  `MCP_REPLAY_KV_REST_API_TOKEN`
 
 Production fails closed when the store is not explicitly selected, when memory is
 selected, or when Redis is unavailable.

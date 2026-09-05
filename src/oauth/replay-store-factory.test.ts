@@ -15,6 +15,8 @@ const ENV_KEYS = [
   "UPSTASH_REDIS_REST_TOKEN",
   "KV_REST_API_URL",
   "KV_REST_API_TOKEN",
+  "MCP_REPLAY_KV_REST_API_URL",
+  "MCP_REPLAY_KV_REST_API_TOKEN",
 ] as const;
 
 async function withEnv(
@@ -68,6 +70,15 @@ test("upstash mode accepts Upstash and Vercel Marketplace credentials", async ()
       MCP_OAUTH_REPLAY_STORE: "upstash",
       KV_REST_API_URL: "https://example.upstash.io",
       KV_REST_API_TOKEN: "token",
+    },
+    () => assert.ok(createOAuthReplayStore() instanceof RedisOAuthReplayStore),
+  );
+
+  await withEnv(
+    {
+      MCP_OAUTH_REPLAY_STORE: "upstash",
+      MCP_REPLAY_KV_REST_API_URL: "https://example.upstash.io",
+      MCP_REPLAY_KV_REST_API_TOKEN: "token",
     },
     () => assert.ok(createOAuthReplayStore() instanceof RedisOAuthReplayStore),
   );

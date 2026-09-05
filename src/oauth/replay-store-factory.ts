@@ -8,13 +8,15 @@ import {
 
 export type OAuthReplayStoreMode = "memory" | "upstash";
 
-function required(name: string, fallbackName?: string): string {
-  const value = process.env[name]?.trim() ||
-    (fallbackName ? process.env[fallbackName]?.trim() : undefined);
+function required(...names: string[]): string {
+  const value = names
+    .map((name) => process.env[name]?.trim())
+    .find((candidate): candidate is string => Boolean(candidate));
 
   if (!value) {
-    const suffix = fallbackName ? ` (or ${fallbackName})` : "";
-    throw new Error(`${name}${suffix} is required for the Upstash OAuth replay store`);
+    throw new Error(
+      `${names.join(" or ")} is required for the Upstash OAuth replay store`,
+    );
   }
 
   return value;
@@ -50,8 +52,16 @@ export function createOAuthReplayStore(): OAuthReplayStore {
   if (oauthReplayStoreMode() === "memory") return new MemoryOAuthReplayStore();
 
   const redis = new Redis({
-    url: required("UPSTASH_REDIS_REST_URL", "KV_REST_API_URL"),
-    token: required("UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN"),
+    url: required(
+      "UPSTASH_REDIS_REST_URL",
+      "KV_REST_API_URL",
+      "MCP_REPLAY_KV_REST_API_URL",
+    ),
+    token: required(
+      "UPSTASH_REDIS_REST_TOKEN",
+      "KV_REST_API_TOKEN",
+      "MCP_REPLAY_KV_REST_API_TOKEN",
+    ),
   });
 
   return new RedisOAuthReplayStore({

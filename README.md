@@ -197,8 +197,9 @@ UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
 ```
 
-Vercel Marketplace integrations that inject `KV_REST_API_URL` and
-`KV_REST_API_TOKEN` are also supported. Production refuses an implicit memory-store
+Vercel Marketplace integrations that inject `KV_REST_API_URL` / `KV_REST_API_TOKEN`,
+or the namespaced `MCP_REPLAY_KV_REST_API_URL` / `MCP_REPLAY_KV_REST_API_TOKEN`,
+are also supported. Production refuses an implicit memory-store
 fallback and fails closed if the selected Upstash store is unavailable. Real values
 belong in the deployment secret store and must not be committed.
 
