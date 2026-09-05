@@ -326,7 +326,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       assertProjectWriteAllowed(config, projectId);
       try {
         const result = await addItemToProject(client, projectId, contentId);
-        const audit = writeAuditLog.record({
+        writeAuditLog.record({
           operation: "add_project_item",
           outcome: "success",
           projectId,
@@ -340,7 +340,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
           verified: false,
           errorCode: null,
         });
-        return json({ result, auditId: audit.id });
+        return json(result);
       } catch (error) {
         writeAuditLog.record({
           operation: "add_project_item",
@@ -388,7 +388,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       assertProjectWriteAllowed(config, projectId);
       try {
         const result = await updateProjectItemField(client, projectId, itemId, fieldId, value);
-        const audit = writeAuditLog.record({
+        writeAuditLog.record({
           operation: "update_project_item_field",
           outcome: "success",
           projectId,
@@ -402,7 +402,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
           verified: false,
           errorCode: null,
         });
-        return json({ result, auditId: audit.id });
+        return json(result);
       } catch (error) {
         writeAuditLog.record({
           operation: "update_project_item_field",
