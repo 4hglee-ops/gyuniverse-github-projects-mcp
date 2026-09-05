@@ -8,9 +8,12 @@
     "build": "tsc",
     "dev": "tsx src/mcp/stdio.ts",
     "mcp:stdio": "tsx src/mcp/stdio.ts",
+    "mcp:http": "tsx src/http/node-server.ts",
     "smoke:read": "pnpm build && node dist/scripts/smoke-read.js",
+    "smoke:http": "tsx src/scripts/smoke-http.ts",
     "smoke:update-single-select": "pnpm build && node dist/scripts/smoke-update-single-select.js",
     "start": "node dist/mcp/stdio.js",
+    "start:http": "node dist/http/node-server.js",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",
     "typecheck": "tsc --noEmit"
   },

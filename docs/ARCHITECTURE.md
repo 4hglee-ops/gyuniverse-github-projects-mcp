@@ -105,7 +105,11 @@ Current public route contract:
 /health
 ```
 
-`router.ts` is intentionally hosting-provider neutral. A future deployment adapter should only translate the provider/runtime request into the standard Fetch Request/Response contract and must not duplicate authorization logic.
+`router.ts` is intentionally hosting-provider neutral. `node-server.ts` is the long-lived
+Node adapter: it translates `node:http` requests into the standard Fetch Request/Response
+contract and does not duplicate authorization logic. The current process-local replay
+store makes a single long-lived Node instance the supported runtime topology until a shared
+replay store is introduced.
 
 ## OAuth credential model
 

@@ -17,7 +17,7 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 - OAuth `projects:read` / `projects:write` separation
 - GitHub credential remains server-side only
 - Remote writes require OAuth write scope **and** the existing server-side write gates
-- Deployment adapter / production deployment not selected yet
+- Long-lived Node HTTP adapter implemented; production host/deployment pending
 - No delete tools
 
 ## MCP tools
@@ -143,7 +143,8 @@ Use `pnpm mcp:stdio` during development when you want to run directly from TypeS
 
 ## Remote MCP core
 
-M3 adds a platform-neutral Fetch `Request -> Response` router in `src/http/router.ts`.
+M3 adds a platform-neutral Fetch `Request -> Response` router in `src/http/router.ts`
+and a long-lived Node HTTP adapter in `src/http/node-server.ts`.
 
 Current routes:
 
@@ -158,7 +159,27 @@ Current routes:
 | `/oauth/token` | Authorization-code / refresh-token exchange |
 | `/health` | Minimal health response |
 
-The core router intentionally does not choose a hosting provider. A deployment-specific adapter can forward incoming Requests to `handleRemoteHttpRequest()` after the deployment architecture is selected.
+The Node adapter translates `node:http` requests into Fetch requests and streams Fetch
+responses back to the client. It is intended for a single long-lived process because the
+current authorization-code replay store is process-local.
+
+Run the TypeScript entrypoint during development:
+
+```bash
+pnpm mcp:http
+```
+
+For the compiled runtime:
+
+```bash
+pnpm build
+pnpm start:http
+```
+
+The adapter listens on `MCP_HTTP_HOST` (`0.0.0.0` by default) and `MCP_HTTP_PORT`
+(`PORT`, then `3000`, as fallbacks). With the server running, execute the assertion-based
+runtime smoke test using `pnpm smoke:http`. Set `MCP_HTTP_BASE_URL` when the test must
+connect to an address other than `http://localhost:${MCP_HTTP_PORT}`.
 
 ### Remote OAuth configuration
 
@@ -428,7 +449,7 @@ src/
 - [x] safer high-level Status / Priority mutation tools
 - [x] bounded process-local write audit log
 
-### M3 — remote MCP ◐ core implemented / deployment decision pending
+### M3 — remote MCP ◐ Node runtime implemented / production deployment pending
 
 - [x] platform-neutral HTTP MCP request handler
 - [x] OAuth protected-resource metadata
@@ -438,8 +459,8 @@ src/
 - [x] OAuth read/write scope separation
 - [x] remote write defense-in-depth
 - [x] secret-free OAuth/HTTP regression tests
-- [ ] deployment runtime / topology decision
-- [ ] deployment adapter
+- [x] single-instance long-lived Node runtime selected
+- [x] Node HTTP deployment adapter
 - [ ] production secret configuration
 - [ ] live ChatGPT connection smoke test
 - [ ] live Claude connection smoke test
