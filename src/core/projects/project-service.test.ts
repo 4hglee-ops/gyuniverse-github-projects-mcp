@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { AppConfig } from "../../config.js";
+import { principalForRole } from "../identity/principal.js";
 import { GitHubGraphQlClient } from "../../github/graphql-client.js";
 import { ProjectService, projectIdOf } from "./project-service.js";
 
@@ -19,7 +20,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     githubToken: "test-token",
     allowedOwners: ["gyuniverse-hq"],
-    allowedProjectIds: ["PVT_allowed"],
+    allowedProjectIds: ["PVT_allowed", "PVT_second"],
     writeEnabled: false,
     ...overrides,
   };
@@ -42,28 +43,50 @@ test("listProjects centralizes owner and project allowlist filtering", async () 
       },
     },
   }));
-  const service = new ProjectService({ config: config(), client });
+  const service = new ProjectService({ config: config({ allowedProjectIds: ["PVT_allowed"] }), client });
 
   const projects = await service.listProjects("gyuniverse-hq", 20) as Array<{ id: string }>;
   assert.deepEqual(projects.map((project) => project.id), ["PVT_allowed"]);
   await assert.rejects(() => service.listProjects("other-org", 20), /owner is not allowed/);
 });
 
-test("resolveProject applies the same Project allowlist boundary", async () => {
+test("authenticated project listing is restricted to principal memberships", async () => {
+  const client = new StubGraphQlClient(() => ({
+    repositoryOwner: {
+      projectsV2: {
+        nodes: [
+          { id: "PVT_allowed", number: 2, title: "Allowed" },
+          { id: "PVT_second", number: 3, title: "Second" },
+        ],
+      },
+    },
+  }));
+  const principal = principalForRole("user:member", "member", { projectIds: ["PVT_allowed"] });
+  const service = new ProjectService({ config: config(), client, principal });
+
+  const projects = await service.listProjects("gyuniverse-hq", 20) as Array<{ id: string }>;
+  assert.deepEqual(projects.map((project) => project.id), ["PVT_allowed"]);
+});
+
+test("resolveProject applies server allowlist and principal membership boundaries", async () => {
   const client = new StubGraphQlClient((_query, variables) => ({
     repositoryOwner: {
       projectV2: {
-        id: variables.number === 2 ? "PVT_allowed" : "PVT_hidden",
+        id: variables.number === 2 ? "PVT_allowed" : "PVT_second",
         number: variables.number,
         title: "Project",
       },
     },
   }));
-  const service = new ProjectService({ config: config(), client });
+  const principal = principalForRole("user:viewer", "viewer", { projectIds: ["PVT_allowed"] });
+  const service = new ProjectService({ config: config(), client, principal });
 
   const project = await service.resolveProject("gyuniverse-hq", 2) as { id: string };
   assert.equal(project.id, "PVT_allowed");
-  await assert.rejects(() => service.resolveProject("gyuniverse-hq", 3), /Project is not allowed/);
+  await assert.rejects(
+    () => service.resolveProject("gyuniverse-hq", 3),
+    /PROJECT_MEMBERSHIP_DENIED/,
+  );
 });
 
 test("read methods reuse resolveProject before fetching project data", async () => {

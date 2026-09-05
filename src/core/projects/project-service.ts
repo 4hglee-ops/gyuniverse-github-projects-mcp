@@ -3,6 +3,9 @@ import {
   assertOwnerAllowed,
   assertProjectAllowed,
 } from "../../config.js";
+import { IdentityPolicy } from "../identity/identity-policy.js";
+import type { AuthenticatedPrincipal } from "../identity/principal.js";
+import { principalHasProject } from "../identity/principal.js";
 import { GitHubGraphQlClient } from "../../github/graphql-client.js";
 import {
   getProject,
@@ -28,40 +31,56 @@ export function projectIdOf(project: unknown): string {
 export interface ProjectServiceOptions {
   config: AppConfig;
   client: GitHubGraphQlClient;
+  principal?: AuthenticatedPrincipal | null;
 }
 
-/**
- * Shared business boundary for GitHub Projects read operations.
- *
- * Transport adapters should call this service instead of duplicating owner/project
- * allowlist checks around low-level GitHub API functions. M5 migrates callers into
- * this service incrementally so the existing MCP behavior stays stable while a REST
- * adapter can reuse the same logic later.
- */
+/** Shared business boundary for GitHub Projects read operations. */
 export class ProjectService {
+  private readonly identity = new IdentityPolicy();
+
   constructor(private readonly options: ProjectServiceOptions) {}
+
+  private assertPrincipalRead(projectId: string): void {
+    const principal = this.options.principal ?? null;
+    if (!principal) return;
+    this.identity.assertPermission(principal, "project.read");
+    if (!principalHasProject(principal, projectId)) {
+      throw new Error(
+        `PROJECT_MEMBERSHIP_DENIED: Principal '${principal.id}' is not assigned to Project '${projectId}'.`,
+      );
+    }
+  }
 
   async listProjects(owner: string, first = 20): Promise<unknown[]> {
     assertOwnerAllowed(this.options.config, owner);
     const projects = await listProjects(this.options.client, owner, first);
 
-    if (this.options.config.allowedProjectIds.length === 0) {
-      return projects;
-    }
-
     return projects.filter((project) => {
+      let projectId: string;
       try {
-        return this.options.config.allowedProjectIds.includes(projectIdOf(project));
+        projectId = projectIdOf(project);
       } catch {
         return false;
       }
+
+      if (
+        this.options.config.allowedProjectIds.length > 0 &&
+        !this.options.config.allowedProjectIds.includes(projectId)
+      ) return false;
+
+      const principal = this.options.principal ?? null;
+      if (!principal) return true;
+      if (!principal.permissions.includes("project.read")) return false;
+      return principalHasProject(principal, projectId);
     });
   }
 
   async resolveProject(owner: string, number: number): Promise<unknown> {
     assertOwnerAllowed(this.options.config, owner);
     const project = await getProject(this.options.client, owner, number);
-    assertProjectAllowed(this.options.config, projectIdOf(project));
+    const projectId = projectIdOf(project);
+    assertProjectAllowed(this.options.config, projectId);
+    this.assertPrincipalRead(projectId);
     return project;
   }
 

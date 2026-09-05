@@ -127,8 +127,8 @@ Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
 - [x] Enforce per-principal Project membership before writes
 - [x] Propagate actor identity into mutation audit records
 - [x] Preserve legacy shared-team OAuth compatibility during migration
-- [ ] Make authenticated identity authoritative for `get_my_work`
-- [ ] Apply principal Project membership to high-level read access
+- [x] Make authenticated identity authoritative for `get_my_work`; login cannot impersonate another identity
+- [x] Apply principal `project.read` + Project membership to Project reads, snapshots, high-level reads, analysis, and checkpoint/change paths through `ProjectService`
 - [ ] Remove legacy shared-team write authorization after migration
 - [ ] Complete M7 validation with at least one Admin, Member, and Viewer identity
 
@@ -146,6 +146,11 @@ Individual OAuth identities are configured server-side. Access codes are credent
 must never be committed, logged, or pasted into project documentation. The registry
 stores only the configured identity model at runtime; tokens carry the stable subject,
 and role/Project membership are resolved again from the server registry on requests.
+
+Authenticated remote reads now fail closed at the shared `ProjectService` boundary when
+the principal lacks `project.read` or membership in the target Project. Local/stdio
+calls without a principal retain the existing server allowlist behavior for development
+compatibility.
 
 Multiple authorized users may receive write permissions. The server credential remains
 the backend capability; authenticated Identity / ACL decides which user may invoke

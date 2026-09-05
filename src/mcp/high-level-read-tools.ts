@@ -2,12 +2,14 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { ProjectChangeService } from "../core/changes/project-change-service.js";
+import type { AuthenticatedPrincipal } from "../core/identity/principal.js";
 import { HighLevelReadService } from "../core/reads/high-level-read-service.js";
 
 interface RegisterHighLevelReadToolsOptions {
   server: McpServer;
   reads: HighLevelReadService;
   changes: ProjectChangeService;
+  principal?: AuthenticatedPrincipal | null;
   json: (value: unknown) => { content: Array<{ type: "text"; text: string }> };
 }
 
@@ -18,7 +20,35 @@ const projectInput = z.object({
   includeArchived: z.boolean().default(false),
 });
 
-export function registerHighLevelReadTools({ server, reads, changes, json }: RegisterHighLevelReadToolsOptions): void {
+export function resolveMyWorkLogin(
+  principal: AuthenticatedPrincipal | null | undefined,
+  requestedLogin?: string,
+): string {
+  const explicit = requestedLogin?.trim() || null;
+  if (!principal) {
+    if (!explicit) throw new Error("login is required for get_my_work when no authenticated identity is available.");
+    return explicit;
+  }
+
+  const identityLogin = principal.githubLogin?.trim() || null;
+  if (!identityLogin) {
+    throw new Error(`IDENTITY_GITHUB_LOGIN_REQUIRED: Principal '${principal.id}' has no GitHub login mapping.`);
+  }
+  if (explicit && explicit.toLowerCase() !== identityLogin.toLowerCase()) {
+    throw new Error(
+      `IDENTITY_LOGIN_MISMATCH: get_my_work is bound to authenticated GitHub login '${identityLogin}'.`,
+    );
+  }
+  return identityLogin;
+}
+
+export function registerHighLevelReadTools({
+  server,
+  reads,
+  changes,
+  principal = null,
+  json,
+}: RegisterHighLevelReadToolsOptions): void {
   server.registerTool(
     "get_project_brief",
     {
@@ -34,16 +64,22 @@ export function registerHighLevelReadTools({ server, reads, changes, json }: Reg
   server.registerTool(
     "get_my_work",
     {
-      description: "Return Project items assigned to one GitHub login. Login is explicit until M7 individual identity is available.",
+      description: "Return work assigned to the authenticated GitHub identity. The optional login is accepted only as a compatibility assertion and cannot override authenticated identity.",
       inputSchema: projectInput.extend({
-        login: z.string().min(1),
+        login: z.string().min(1).optional(),
         includeDone: z.boolean().default(false),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, first, includeArchived, login, includeDone }) => json(
-      await reads.getMyWork(owner, number, { first, includeArchived, login, includeDone }),
-    ),
+    async ({ owner, number, first, includeArchived, login, includeDone }) => {
+      const effectiveLogin = resolveMyWorkLogin(principal, login);
+      return json(await reads.getMyWork(owner, number, {
+        first,
+        includeArchived,
+        login: effectiveLogin,
+        includeDone,
+      }));
+    },
   );
 
   server.registerTool(
