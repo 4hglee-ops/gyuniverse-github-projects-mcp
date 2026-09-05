@@ -2,41 +2,45 @@
 
 ## Decision
 
-M3 remote MCP should not be deployed on a stateless serverless runtime as the first production target.
-
-Recommended runtime:
+M3 remote MCP initial deployment target:
 
 - long-lived Node.js HTTP process
 - single active instance initially
-- explicit scaling decision before multiple replicas
+- explicit scaling decision before replicas
 
 ## Reason
 
-The current OAuth authorization-code replay protection uses a process-local replay store.
+The OAuth authorization-code replay protection currently uses a process-local replay store. A stateless serverless deployment can route exchanges to different workers and cannot guarantee global one-time-code consumption without shared state.
 
-A stateless serverless deployment can route two token exchange requests for the same authorization code to different instances. In that case each instance has its own memory state and cannot guarantee global one-time-code consumption.
+## Implemented adapter
 
-The current implementation is intentionally honest about this limitation:
+`src/http/node-server.ts` provides the initial Node.js runtime adapter.
 
-- local development: supported
-- single long-lived instance: supported
-- horizontally scaled/serverless deployment: requires shared replay state
+Flow:
+
+```
+HTTP request
+   -> Node HTTP adapter
+   -> Fetch Request
+   -> handleRemoteHttpRequest()
+   -> Response
+```
+
+The core router remains platform-neutral.
 
 ## Vercel / serverless assessment
 
-Vercel serverless is suitable only after introducing one of:
+Not selected for the first runtime.
 
-1. shared replay store (Redis/KV/database)
-2. external authorization service
-3. deployment architecture that guarantees affinity to a single instance
+Before multi-instance/serverless deployment:
 
-Without one of these, OAuth replay guarantees are weaker than intended.
+- implement shared OAuthReplayStore
+- select Redis/KV/database or external authorization service
+- validate distributed replay behavior
+- provision deployment secrets
 
-## Next production boundary
+## Current support
 
-Before multi-instance deployment:
-
-- select shared replay storage
-- add deployment adapter
-- provision secrets through deployment secret management
-- run live ChatGPT/Claude OAuth smoke tests
+- local development: supported
+- single Node runtime: supported
+- multi-instance/serverless: deferred
