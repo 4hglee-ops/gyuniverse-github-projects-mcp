@@ -21,13 +21,13 @@ filter/group and field menus.
    - Purpose: triage work that has not started yet
 2. **🏃 Active Work**
    - Layout: Board
-   - Filter: Status is Todo, In Progress, or In Review
+   - Filter: `status:Todo,"In Progress","In Review"`
    - Columns/grouping: Status
    - Visible fields: Title, Priority, Repository, Assignees, Status
    - Purpose: run active work continuously without a Sprint boundary
 3. **👤 My Work**
    - Layout: Table
-   - Filter: `assignee:@me`
+   - Filter: `assignee:@me -status:Done`
    - Grouping: None
    - Visible fields: Title, Status, Priority, Repository, Assignees
    - Purpose: show work assigned to the current viewer

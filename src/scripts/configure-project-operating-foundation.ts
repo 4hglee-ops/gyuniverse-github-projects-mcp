@@ -9,15 +9,7 @@ import {
   planProjectViews,
 } from "../project-foundation/operating-foundation.js";
 
-function option(name: string): string | undefined {
-  const prefix = `--${name}=`;
-  return process.argv.slice(2).find((argument) => argument.startsWith(prefix))?.slice(prefix.length);
-}
-
 const apply = process.argv.slice(2).includes("--apply");
-const sprintDaysInput = option("sprint-days");
-const sprintStart = option("sprint-start");
-const sprintDays = sprintDaysInput === undefined ? undefined : Number(sprintDaysInput);
 const config = loadConfig();
 const graphQl = new GitHubGraphQlClient(config.githubToken);
 const rest = new GitHubRestClient(config.githubToken);
@@ -30,13 +22,10 @@ if (!apply) {
     inspection,
     viewPlan: planProjectViews(inspection),
     iterationPlan: inspection.iteration.exists
-      ? "preserve-existing"
-      : "blocked-until---sprint-days-and---sprint-start-are-explicit",
+      ? "preserve-existing-without-using-it"
+      : "leave-absent-no-sprint-default",
   }, null, 2));
 } else {
-  const result = await applyProjectOperatingFoundation(graphQl, rest, config, {
-    sprintDays,
-    sprintStart,
-  });
+  const result = await applyProjectOperatingFoundation(graphQl, rest, config);
   console.log(JSON.stringify({ mode: "apply", ...result }, null, 2));
 }

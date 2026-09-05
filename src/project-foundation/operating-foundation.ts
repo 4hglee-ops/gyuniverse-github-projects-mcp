@@ -86,21 +86,21 @@ export const DESIRED_VIEWS: readonly DesiredViewSpec[] = [
     layout: "table",
     filter: "status:Backlog",
     visibleFields: ["Title", "Priority", "Repository", "Assignees"],
-    purpose: "Triage work that has not entered a sprint.",
+    purpose: "Triage work that has not started yet.",
   },
   {
-    name: "🏃 Current Sprint",
+    name: "🏃 Active Work",
     layout: "board",
-    filter: "iteration:@current",
-    visibleFields: ["Title", "Priority", "Repository", "Assignees", "Status", "Iteration"],
+    filter: "status:Todo,\"In Progress\",\"In Review\"",
+    visibleFields: ["Title", "Priority", "Repository", "Assignees", "Status"],
     verticalGroupBy: "Status",
-    purpose: "Run the current sprint across the standard Status columns.",
+    purpose: "Run active work continuously across the standard Status columns.",
   },
   {
     name: "👤 My Work",
     layout: "table",
-    filter: "assignee:@me",
-    visibleFields: ["Title", "Status", "Priority", "Repository", "Iteration", "Assignees"],
+    filter: "assignee:@me -status:Done",
+    visibleFields: ["Title", "Status", "Priority", "Repository", "Assignees"],
     purpose: "Show work assigned to the current viewer.",
   },
   {
@@ -113,7 +113,7 @@ export const DESIRED_VIEWS: readonly DesiredViewSpec[] = [
   {
     name: "🧩 Workstream",
     layout: "table",
-    visibleFields: ["Title", "Repository", "Status", "Priority", "Assignees", "Iteration"],
+    visibleFields: ["Title", "Repository", "Status", "Priority", "Assignees"],
     groupBy: "Repository",
     purpose: "Organize frontend, backend, and LLM/RAG work by repository.",
   },
@@ -508,49 +508,6 @@ export function planProjectViews(inspection: ProjectFoundationInspection): ViewP
   });
 }
 
-export interface FoundationApplyOptions {
-  sprintDays?: number;
-  sprintStart?: string;
-}
-
-function validateSprintOptions(options: FoundationApplyOptions): { duration: number; startDate: string } {
-  if (!Number.isInteger(options.sprintDays) || (options.sprintDays ?? 0) < 1 || (options.sprintDays ?? 0) > 365) {
-    throw new Error("SPRINT_CADENCE_REQUIRED: Provide --sprint-days=<positive integer up to 365>.");
-  }
-  if (!options.sprintStart || !/^\d{4}-\d{2}-\d{2}$/.test(options.sprintStart)
-      || Number.isNaN(new Date(`${options.sprintStart}T00:00:00Z`).getTime())) {
-    throw new Error("SPRINT_START_REQUIRED: Provide --sprint-start=YYYY-MM-DD.");
-  }
-  return { duration: options.sprintDays!, startDate: options.sprintStart };
-}
-
-async function createIterationField(
-  graphQl: GitHubGraphQlClient,
-  projectId: string,
-  options: FoundationApplyOptions,
-): Promise<void> {
-  const cadence = validateSprintOptions(options);
-  await graphQl.request(
-    `mutation($input: CreateProjectV2FieldInput!) {
-      createProjectV2Field(input: $input) {
-        projectV2Field { ... on ProjectV2IterationField { id name dataType } }
-      }
-    }`,
-    {
-      input: {
-        projectId,
-        name: "Iteration",
-        dataType: "ITERATION",
-        iterationConfiguration: {
-          duration: cadence.duration,
-          startDate: cadence.startDate,
-          iterations: [],
-        },
-      },
-    },
-  );
-}
-
 function assertTargetProject(inspection: ProjectFoundationInspection): void {
   if (inspection.project.id !== TARGET_PROJECT.id
       || inspection.project.number !== TARGET_PROJECT.number
@@ -563,7 +520,6 @@ export async function applyProjectOperatingFoundation(
   graphQl: GitHubGraphQlClient,
   rest: GitHubRestClient,
   config: AppConfig,
-  options: FoundationApplyOptions,
 ): Promise<{ before: ProjectFoundationInspection; actions: string[]; after: ProjectFoundationInspection }> {
   assertOwnerAllowed(config, TARGET_PROJECT.owner);
   const before = await inspectProjectOperatingFoundation(graphQl, rest);
@@ -577,15 +533,10 @@ export async function applyProjectOperatingFoundation(
   }
 
   const actions: string[] = ["preserved existing Priority field and options"];
-  let current = before;
-  if (!current.iteration.exists) {
-    await createIterationField(graphQl, current.project.id, options);
-    current = await inspectProjectOperatingFoundation(graphQl, rest);
-    if (!current.iteration.exists) throw new Error("MUTATION_VERIFICATION_FAILED: Iteration field was not visible after creation.");
-    actions.push("created and re-read Iteration field");
-  } else {
-    actions.push("preserved existing Iteration field");
-  }
+  const current = before;
+  actions.push(current.iteration.exists
+    ? "preserved existing Iteration field without using it"
+    : "left Iteration absent for the no-sprint operating model");
 
   const viewPlans = planProjectViews(current);
   for (const plan of viewPlans) {

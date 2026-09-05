@@ -71,7 +71,7 @@ test("reports an incompatible same-name view for manual review", () => {
   state.views.push({
     id: "view-1",
     number: 1,
-    name: "🏃 Current Sprint",
+    name: "🏃 Active Work",
     layout: "TABLE_LAYOUT",
     filter: null,
     visibleFields: ["Title"],
@@ -93,4 +93,16 @@ test("workflow detail access does not block readable view planning", () => {
   const state = inspection();
   state.access.workflowsReadable = false;
   assert.ok(planProjectViews(state).every((plan) => plan.action === "create"));
+});
+
+test("no-sprint planning does not require an Iteration field", () => {
+  const state = inspection();
+  state.fields = state.fields.filter((field) => field.name !== "Iteration");
+  state.iteration = { exists: false, field: null };
+
+  const plans = planProjectViews(state);
+  assert.ok(plans.every((plan) => plan.action === "create"));
+  assert.equal(plans[1]?.spec.name, "🏃 Active Work");
+  assert.equal(plans[1]?.request?.filter, "status:Todo,\"In Progress\",\"In Review\"");
+  assert.ok(plans.every((plan) => !plan.spec.visibleFields.includes("Iteration")));
 });

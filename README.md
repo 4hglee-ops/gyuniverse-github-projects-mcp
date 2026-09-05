@@ -479,11 +479,11 @@ src/
 
 ### M4 — Project Operating Foundation ◐
 
-- [x] inspect Project #2, Status, Priority, Iteration, field IDs, and API access
+- [x] inspect Project #2, Status, Priority, optional Iteration, field IDs, and API access
 - [x] preserve existing Priority P0/P1/P2/P3
-- [x] add dry-run-first Iteration/view setup with write gates and re-read verification
-- [ ] choose and apply the Iteration cadence
-- [ ] create/verify Backlog, Current Sprint, My Work, Review Queue, and Workstream views
+- [x] add dry-run-first no-sprint view setup with write gates and re-read verification
+- [x] keep Iteration disabled by default for the continuous-flow operating model
+- [ ] create/verify Backlog, Active Work, My Work, Review Queue, and Workstream views
 - [ ] configure built-in close/merge/auto-add workflows
 - [ ] install ready-for-review Actions in the three source repositories
 

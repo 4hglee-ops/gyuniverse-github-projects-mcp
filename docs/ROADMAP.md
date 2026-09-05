@@ -18,7 +18,7 @@
 - [x] Inspect Project #2 and preserve Priority P0 / P1 / P2 / P3
 - [x] Add safe inspection, dry-run, API apply, and verification code
 - [x] Decide **not to use Sprint / Iteration** for the initial operating model
-- [ ] Update M4 apply so Iteration is optional and disabled by default
+- [x] Update M4 apply so Iteration is optional and disabled by default
 - [ ] Create/verify Backlog / Active Work / My Work / Review Queue / Workstream views
 - [ ] Enable/verify Issue closed -> Done and PR merged -> Done
 - [ ] Configure Issue/PR auto-add for the three source repositories

@@ -83,9 +83,8 @@ Dry-run remains the default for configuration:
 pnpm project:foundation:configure
 ```
 
-The M4 implementation must be adjusted so an explicit no-sprint apply can create or
-verify views without creating Iteration. Until that patch is merged, do not run the
-existing Iteration-oriented apply command against Project #2.
+The M4 configure command uses the no-sprint model by default. It creates or verifies
+views without creating Iteration and requires no sprint parameters.
 
 An eventual apply still requires the existing write controls:
 
@@ -103,8 +102,8 @@ to read-only if no more setup changes are planned.
 | View | Layout | Filter/grouping | Visible fields |
 | --- | --- | --- | --- |
 | 📥 Backlog | Table | Status = Backlog | Title, Priority, Repository, Assignees |
-| 🏃 Active Work | Board | Todo / In Progress / In Review; columns by Status | Title, Priority, Repository, Assignees, Status |
-| 👤 My Work | Table | `assignee:@me`; optionally hide Done | Title, Status, Priority, Repository, Assignees |
+| 🏃 Active Work | Board | `status:Todo,"In Progress","In Review"`; columns by Status | Title, Priority, Repository, Assignees, Status |
+| 👤 My Work | Table | `assignee:@me -status:Done` | Title, Status, Priority, Repository, Assignees |
 | 🔍 Review Queue | Table | Status = In Review | Title, Repository, Linked pull requests, Reviewers, Assignees, Priority |
 | 🧩 Workstream | Table | Group by Repository | Title, Repository, Status, Priority, Assignees |
 
@@ -121,7 +120,6 @@ to read-only if no more setup changes are planned.
 
 ## Remaining work
 
-1. Update the M4 configure implementation so Iteration is optional and disabled by default for Project #2.
-2. Create/verify the no-sprint views.
-3. Verify built-in workflows and auto-add filters in the Project UI.
-4. Install the ready-for-review Action in each source repository.
+1. Create/verify the no-sprint views.
+2. Verify built-in workflows and auto-add filters in the Project UI.
+3. Install the ready-for-review Action in each source repository.
