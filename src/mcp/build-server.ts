@@ -8,6 +8,7 @@ import {
   assertProjectWriteAllowed,
 } from "../config.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
+import { findProjectItemByContentId } from "../github/project-items.js";
 import {
   addItemToProject,
   getProject,
@@ -17,6 +18,14 @@ import {
   listProjects,
   updateProjectItemField,
 } from "../github/projects.js";
+import {
+  parseGitHubIssueOrPullRequestUrl,
+  resolveGitHubIssueOrPullRequest,
+} from "../github/references.js";
+import { analyzeProjectReconciliation } from "../workflow/reconciliation.js";
+import { analyzeProjectStateGaps } from "../workflow/state-gaps.js";
+import { registerCheckpointTools } from "./checkpoint-tools.js";
+import { registerWorkflowWriteTools, writeAuditLog } from "./workflow-write-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -39,7 +48,7 @@ function projectIdOf(project: unknown): string {
 export function buildMcpServer({ config, client }: BuildServerOptions): McpServer {
   const server = new McpServer({
     name: "gyuniverse-github-projects-mcp",
-    version: "0.1.0",
+    version: "0.2.0",
   });
 
   async function resolveProject(owner: string, number: number): Promise<unknown> {
@@ -48,6 +57,9 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     assertProjectAllowed(config, projectIdOf(project));
     return project;
   }
+
+  registerCheckpointTools({ server, client, resolveProject, json });
+  registerWorkflowWriteTools({ server, client, config, resolveProject, projectIdOf, json });
 
   server.registerTool(
     "list_github_projects",
@@ -85,7 +97,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   server.registerTool(
     "list_github_project_fields",
     {
-      description: "List fields, single-select options, and iterations configured on a GitHub Project v2.",
+      description: "List fields, single-select options, multi-select options, and iterations configured on a GitHub Project v2.",
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -113,6 +125,48 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   );
 
   server.registerTool(
+    "resolve_github_issue_or_pr_url",
+    {
+      description: "Resolve an allowed github.com Issue or Pull Request URL to its GraphQL content node ID and canonical metadata.",
+      inputSchema: z.object({
+        url: z.string().url(),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ url }) => {
+      const parsed = parseGitHubIssueOrPullRequestUrl(url);
+      assertOwnerAllowed(config, parsed.owner);
+      return json(await resolveGitHubIssueOrPullRequest(client, url));
+    },
+  );
+
+  server.registerTool(
+    "resolve_github_project_item",
+    {
+      description: "Resolve an allowed GitHub Issue or Pull Request URL to the matching item in an allowed GitHub Project, following Project item pagination when needed.",
+      inputSchema: z.object({
+        projectOwner: z.string().min(1),
+        projectNumber: z.number().int().min(1),
+        url: z.string().url(),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ projectOwner, projectNumber, url }) => {
+      const parsed = parseGitHubIssueOrPullRequestUrl(url);
+      assertOwnerAllowed(config, parsed.owner);
+      await resolveProject(projectOwner, projectNumber);
+      const resolvedContent = await resolveGitHubIssueOrPullRequest(client, url);
+      const projectItem = await findProjectItemByContentId(
+        client,
+        projectOwner,
+        projectNumber,
+        resolvedContent.contentId,
+      );
+      return json({ resolvedContent, projectItem });
+    },
+  );
+
+  server.registerTool(
     "get_github_project_snapshot",
     {
       description: "Return a normalized snapshot of project metadata, fields, items, status, priority, iteration, repository, and assignees for AI team-state analysis.",
@@ -126,6 +180,97 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     async ({ owner, number, first }) => {
       await resolveProject(owner, number);
       return json(await getProjectSnapshot(client, owner, number, first));
+    },
+  );
+
+  server.registerTool(
+    "analyze_github_project_state_gaps",
+    {
+      description: "Analyze an allowed GitHub Project snapshot for missing Status and missing assignee gaps while preserving item evidence.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        number: z.number().int().min(1),
+        first: z.number().int().min(1).max(100).default(100),
+        statusFieldName: z.string().min(1).default("Status"),
+        assigneeFieldNames: z.array(z.string().min(1)).max(10).default(["Assignees", "Assignee"]),
+        completedStatusNames: z.array(z.string().min(1)).max(20).default(["Done", "Completed", "Closed"]),
+        includeArchived: z.boolean().default(false),
+        includeCompletedForAssignee: z.boolean().default(false),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({
+      owner,
+      number,
+      first,
+      statusFieldName,
+      assigneeFieldNames,
+      completedStatusNames,
+      includeArchived,
+      includeCompletedForAssignee,
+    }) => {
+      await resolveProject(owner, number);
+      const snapshot = await getProjectSnapshot(client, owner, number, first) as Parameters<typeof analyzeProjectStateGaps>[0];
+      const analysis = analyzeProjectStateGaps(snapshot, {
+        statusFieldName,
+        assigneeFieldNames,
+        completedStatusNames,
+        includeArchived,
+        includeCompletedForAssignee,
+      });
+      return json({
+        ...analysis,
+        coverage: {
+          requestedItems: first,
+          returnedItems: snapshot.itemCount ?? 0,
+          completeBeyondFirstPage: false,
+          note: "State-gap analysis currently uses the normalized snapshot path, which is bounded by the requested first value (max 100). Use the pagination-aware Project item resolver for exhaustive single-item lookup.",
+        },
+      });
+    },
+  );
+
+  server.registerTool(
+    "analyze_github_project_reconciliation",
+    {
+      description: "Compare Pull Request merge state with Project Status and surface evidence-backed workflow mismatches.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        number: z.number().int().min(1),
+        first: z.number().int().min(1).max(100).default(100),
+        statusFieldName: z.string().min(1).default("Status"),
+        completedStatusNames: z.array(z.string().min(1)).max(20).default(["Done", "Completed", "Closed"]),
+        includeArchived: z.boolean().default(false),
+        reportDoneButNotMerged: z.boolean().default(true),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({
+      owner,
+      number,
+      first,
+      statusFieldName,
+      completedStatusNames,
+      includeArchived,
+      reportDoneButNotMerged,
+    }) => {
+      await resolveProject(owner, number);
+      const snapshot = await getProjectSnapshot(client, owner, number, first) as Parameters<typeof analyzeProjectReconciliation>[0];
+      const analysis = analyzeProjectReconciliation(snapshot, {
+        statusFieldName,
+        completedStatusNames,
+        includeArchived,
+        reportDoneButNotMerged,
+      });
+      return json({
+        ...analysis,
+        coverage: {
+          requestedItems: first,
+          returnedItems: snapshot.itemCount ?? 0,
+          completeBeyondFirstPage: false,
+          note: "Reconciliation currently uses the normalized snapshot path, which is bounded by the requested first value (max 100).",
+        },
+      });
     },
   );
 
@@ -179,7 +324,40 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     },
     async ({ projectId, contentId }) => {
       assertProjectWriteAllowed(config, projectId);
-      return json(await addItemToProject(client, projectId, contentId));
+      try {
+        const result = await addItemToProject(client, projectId, contentId);
+        writeAuditLog.record({
+          operation: "add_project_item",
+          outcome: "success",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId: null,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: null,
+        });
+        return json(result);
+      } catch (error) {
+        writeAuditLog.record({
+          operation: "add_project_item",
+          outcome: "failed",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId: null,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: "WRITE_FAILED",
+        });
+        throw error;
+      }
     },
   );
 
@@ -208,7 +386,40 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     },
     async ({ projectId, itemId, fieldId, value }) => {
       assertProjectWriteAllowed(config, projectId);
-      return json(await updateProjectItemField(client, projectId, itemId, fieldId, value));
+      try {
+        const result = await updateProjectItemField(client, projectId, itemId, fieldId, value);
+        writeAuditLog.record({
+          operation: "update_project_item_field",
+          outcome: "success",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: null,
+        });
+        return json(result);
+      } catch (error) {
+        writeAuditLog.record({
+          operation: "update_project_item_field",
+          outcome: "failed",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: "WRITE_FAILED",
+        });
+        throw error;
+      }
     },
   );
 
