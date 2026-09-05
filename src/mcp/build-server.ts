@@ -25,6 +25,7 @@ import {
 import { analyzeProjectReconciliation } from "../workflow/reconciliation.js";
 import { analyzeProjectStateGaps } from "../workflow/state-gaps.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
+import { registerWorkflowWriteTools, writeAuditLog } from "./workflow-write-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -58,6 +59,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   }
 
   registerCheckpointTools({ server, client, resolveProject, json });
+  registerWorkflowWriteTools({ server, client, config, resolveProject, projectIdOf, json });
 
   server.registerTool(
     "list_github_projects",
@@ -322,7 +324,40 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     },
     async ({ projectId, contentId }) => {
       assertProjectWriteAllowed(config, projectId);
-      return json(await addItemToProject(client, projectId, contentId));
+      try {
+        const result = await addItemToProject(client, projectId, contentId);
+        const audit = writeAuditLog.record({
+          operation: "add_project_item",
+          outcome: "success",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId: null,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: null,
+        });
+        return json({ result, auditId: audit.id });
+      } catch (error) {
+        writeAuditLog.record({
+          operation: "add_project_item",
+          outcome: "failed",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId: null,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: "WRITE_FAILED",
+        });
+        throw error;
+      }
     },
   );
 
@@ -351,7 +386,40 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     },
     async ({ projectId, itemId, fieldId, value }) => {
       assertProjectWriteAllowed(config, projectId);
-      return json(await updateProjectItemField(client, projectId, itemId, fieldId, value));
+      try {
+        const result = await updateProjectItemField(client, projectId, itemId, fieldId, value);
+        const audit = writeAuditLog.record({
+          operation: "update_project_item_field",
+          outcome: "success",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: null,
+        });
+        return json({ result, auditId: audit.id });
+      } catch (error) {
+        writeAuditLog.record({
+          operation: "update_project_item_field",
+          outcome: "failed",
+          projectId,
+          projectOwner: null,
+          projectNumber: null,
+          itemId,
+          fieldName: null,
+          requestedValue: null,
+          beforeValue: null,
+          afterValue: null,
+          verified: false,
+          errorCode: "WRITE_FAILED",
+        });
+        throw error;
+      }
     },
   );
 
