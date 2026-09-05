@@ -88,14 +88,10 @@ export function authorizationServerMetadata(): Record<string, unknown> {
 }
 
 function noStoreJson(body: unknown, init: ResponseInit = {}): Response {
-  return Response.json(body, {
-    ...init,
-    headers: {
-      "Cache-Control": "no-store",
-      Pragma: "no-cache",
-      ...(init.headers ?? {}),
-    },
-  });
+  const headers = new Headers(init.headers);
+  headers.set("Cache-Control", "no-store");
+  headers.set("Pragma", "no-cache");
+  return Response.json(body, { ...init, headers });
 }
 
 function tokenError(error: string, description: string, status = 400): Response {
