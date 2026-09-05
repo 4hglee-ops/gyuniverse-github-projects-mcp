@@ -4,18 +4,13 @@ import { z } from "zod";
 import {
   type AppConfig,
   assertOwnerAllowed,
-  assertProjectAllowed,
   assertProjectWriteAllowed,
 } from "../config.js";
+import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { findProjectItemByContentId } from "../github/project-items.js";
 import {
   addItemToProject,
-  getProject,
-  getProjectSnapshot,
-  listProjectFields,
-  listProjectItems,
-  listProjects,
   updateProjectItemField,
 } from "../github/projects.js";
 import {
@@ -36,27 +31,14 @@ function json(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
-function projectIdOf(project: unknown): string {
-  if (!project || typeof project !== "object" || !("id" in project)) {
-    throw new Error("Project response did not contain a node ID.");
-  }
-  const id = (project as { id?: unknown }).id;
-  if (typeof id !== "string" || !id) throw new Error("Project node ID is invalid.");
-  return id;
-}
-
 export function buildMcpServer({ config, client }: BuildServerOptions): McpServer {
   const server = new McpServer({
     name: "gyuniverse-github-projects-mcp",
     version: "0.2.0",
   });
 
-  async function resolveProject(owner: string, number: number): Promise<unknown> {
-    assertOwnerAllowed(config, owner);
-    const project = await getProject(client, owner, number);
-    assertProjectAllowed(config, projectIdOf(project));
-    return project;
-  }
+  const projectService = new ProjectService({ config, client });
+  const resolveProject = projectService.resolveProject.bind(projectService);
 
   registerCheckpointTools({ server, client, resolveProject, json });
   registerWorkflowWriteTools({ server, client, config, resolveProject, projectIdOf, json });
@@ -71,17 +53,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, first }) => {
-      assertOwnerAllowed(config, owner);
-      const projects = await listProjects(client, owner, first);
-      const filtered = config.allowedProjectIds.length === 0
-        ? projects
-        : projects.filter((project) => {
-            try { return config.allowedProjectIds.includes(projectIdOf(project)); }
-            catch { return false; }
-          });
-      return json(filtered);
-    },
+    async ({ owner, first }) => json(await projectService.listProjects(owner, first)),
   );
 
   server.registerTool(
@@ -91,7 +63,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number }) => json(await resolveProject(owner, number)),
+    async ({ owner, number }) => json(await projectService.resolveProject(owner, number)),
   );
 
   server.registerTool(
@@ -101,10 +73,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number }) => {
-      await resolveProject(owner, number);
-      return json(await listProjectFields(client, owner, number));
-    },
+    async ({ owner, number }) => json(await projectService.listProjectFields(owner, number)),
   );
 
   server.registerTool(
@@ -118,10 +87,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, first }) => {
-      await resolveProject(owner, number);
-      return json(await listProjectItems(client, owner, number, first));
-    },
+    async ({ owner, number, first }) => json(await projectService.listProjectItems(owner, number, first)),
   );
 
   server.registerTool(
@@ -154,7 +120,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     async ({ projectOwner, projectNumber, url }) => {
       const parsed = parseGitHubIssueOrPullRequestUrl(url);
       assertOwnerAllowed(config, parsed.owner);
-      await resolveProject(projectOwner, projectNumber);
+      await projectService.resolveProject(projectOwner, projectNumber);
       const resolvedContent = await resolveGitHubIssueOrPullRequest(client, url);
       const projectItem = await findProjectItemByContentId(
         client,
@@ -177,10 +143,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, first }) => {
-      await resolveProject(owner, number);
-      return json(await getProjectSnapshot(client, owner, number, first));
-    },
+    async ({ owner, number, first }) => json(await projectService.getProjectSnapshot(owner, number, first)),
   );
 
   server.registerTool(
@@ -209,8 +172,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       includeArchived,
       includeCompletedForAssignee,
     }) => {
-      await resolveProject(owner, number);
-      const snapshot = await getProjectSnapshot(client, owner, number, first) as Parameters<typeof analyzeProjectStateGaps>[0];
+      const snapshot = await projectService.getProjectSnapshot(owner, number, first) as Parameters<typeof analyzeProjectStateGaps>[0];
       const analysis = analyzeProjectStateGaps(snapshot, {
         statusFieldName,
         assigneeFieldNames,
@@ -254,8 +216,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       includeArchived,
       reportDoneButNotMerged,
     }) => {
-      await resolveProject(owner, number);
-      const snapshot = await getProjectSnapshot(client, owner, number, first) as Parameters<typeof analyzeProjectReconciliation>[0];
+      const snapshot = await projectService.getProjectSnapshot(owner, number, first) as Parameters<typeof analyzeProjectReconciliation>[0];
       const analysis = analyzeProjectReconciliation(snapshot, {
         statusFieldName,
         completedStatusNames,
@@ -286,8 +247,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ owner, number, first }) => {
-      await resolveProject(owner, number);
-      const snapshot = await getProjectSnapshot(client, owner, number, first);
+      const snapshot = await projectService.getProjectSnapshot(owner, number, first);
       return json({
         snapshot,
         contract: {

@@ -6,15 +6,15 @@
 | M2 Workflow Intelligence | Complete | Resolver / Gap / Reconciliation / Checkpoint / Audit |
 | M3 Remote MCP + OAuth | Complete | HTTP / OAuth / PKCE / Vercel / Upstash |
 | M3 ChatGPT Live Read | Complete | Connector OAuth + real Project read |
-| M4 Project Operating Foundation | In progress | Priority / Views / Native automation / no-sprint continuous flow |
-| M5 Shared Core | Planned | Separate transport from business logic |
+| M4 Project Operating Foundation | Complete | Priority / Views / Native automation / no-sprint continuous flow |
+| M5 Shared Core | In progress | Separate transport from business logic |
 | M6 High-level Read | Planned | Brief / My Work / Backlog / Review / Blockers |
 | M7 Identity Foundation | Planned | Individual identity + permission model |
 | M8 High-level Write | Planned | Semantic write + idempotency + verify + audit |
 | M9 REST / GPT Actions | Planned | Operator GPT read/write adapter |
 | M10 Advanced Governance | Planned | Durable state / Bulk / Sub-issue / Dependency |
 
-## M4
+## M4 ✅
 - [x] Inspect Project #2 and preserve Priority P0 / P1 / P2 / P3
 - [x] Add safe inspection, dry-run, API apply, and verification code
 - [x] Decide **not to use Sprint / Iteration** for the initial operating model
@@ -24,10 +24,10 @@
 - [x] Validate canonical repo auto-add -> Backlog
 - [x] Validate Draft -> Ready for review -> In Review
 - [x] Validate Close / Merge -> Done without changing Priority
-- [ ] Rename Project #2 from provisional `LOV WBS` to `Bid Change Validator · WBS`
-- [ ] Synchronize the code-level target title guard with the renamed Project
-- [ ] Document repository transition: three temporary weekend parallel repos -> canonical `bid-change-validator` repo with `develop` + feature branches
-- [ ] Restore PAT / Project permission posture to minimum read-only after M4 writes are complete
+- [x] Rename Project #2 from provisional `LOV WBS` to `Bid Change Validator · WBS`
+- [x] Synchronize the code-level target title guard with the renamed Project
+- [x] Document repository transition: three temporary weekend parallel repos -> canonical `bid-change-validator` repo with `develop` + feature branches
+- [x] Retain write-capable operator development posture with existing safety gates; final per-user authorization moves to M7 Identity / ACL
 
 Repository lifecycle:
 
@@ -49,14 +49,30 @@ both phases.
 
 See `M4_PROJECT_OPERATING_FOUNDATION.md` and `M4_PROJECT_UI_SETUP.md`.
 
-## M5
-Extract shared services incrementally:
+## M5 ◐
+Extract shared services incrementally without rewriting the working MCP adapter.
+
+### Current slice
+- [x] Add `ProjectService` shared-core boundary
+- [x] Centralize Project owner / node-ID allowlist checks for migrated reads
+- [x] Route core Project metadata / fields / items / snapshot MCP reads through `ProjectService`
+- [x] Add regression tests for ProjectService allowlist behavior
+- [ ] Extract `SnapshotService` / workflow analysis boundary
+- [ ] Extract `WorkItemService`
+- [ ] Extract shared `WritePolicy` / mutation boundary
+- [ ] Move audit ownership behind shared core
+- [ ] Keep MCP adapter transport-only as extraction progresses
+
+Target shared services:
 - ProjectService
 - WorkItemService
 - SnapshotService
 - WorkflowService
 - WritePolicy
 - AuditService
+
+M5 rule: use a strangler/incremental extraction. Do not build REST -> MCP -> GitHub or
+MCP -> REST -> GitHub. MCP and future REST adapters must call the same Shared Core.
 
 ## M6
 High-level reads:
@@ -70,6 +86,14 @@ High-level reads:
 
 ## M7
 Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
+
+Target role shape:
+- Admin / PM: broad Project read/write within policy
+- Member: selected writes according to permission policy
+- Viewer: read-only
+
+Multiple authorized users may receive write permissions. The server credential is the
+backend capability; Identity / ACL decides which user may invoke which operation.
 
 ## M8
 High-level writes:
