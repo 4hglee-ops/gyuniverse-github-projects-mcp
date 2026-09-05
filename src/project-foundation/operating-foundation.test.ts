@@ -31,7 +31,7 @@ function inspection(): ProjectFoundationInspection {
     iteration: { exists: true, field: null },
     views: [],
     workflows: [],
-    access: { restFieldsReadable: true, viewsAndWorkflowsReadable: true },
+    access: { restFieldsReadable: true, viewsReadable: true, workflowsReadable: true },
     capabilityClassification: {
       iteration: "official-graphql-api",
       views: "official-rest-api-create-graphql-read",
@@ -87,4 +87,10 @@ test("blocks view creation when a REST field id is unavailable", () => {
   assert.ok(reviewers);
   reviewers.restId = null;
   assert.equal(planProjectViews(state)[3]?.action, "blocked");
+});
+
+test("workflow detail access does not block readable view planning", () => {
+  const state = inspection();
+  state.access.workflowsReadable = false;
+  assert.ok(planProjectViews(state).every((plan) => plan.action === "create"));
 });

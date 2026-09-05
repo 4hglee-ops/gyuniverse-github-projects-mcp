@@ -57,7 +57,8 @@ export interface ProjectFoundationInspection {
   workflows: FoundationWorkflow[];
   access: {
     restFieldsReadable: boolean;
-    viewsAndWorkflowsReadable: boolean;
+    viewsReadable: boolean;
+    workflowsReadable: boolean;
   };
   capabilityClassification: {
     iteration: "official-graphql-api";
@@ -134,6 +135,13 @@ interface ProjectViewsEnvelope {
       url?: string | null;
       viewerCanUpdate?: boolean | null;
       views?: { nodes?: Array<ViewNode | null> | null } | null;
+    } | null;
+  } | null;
+}
+
+interface ProjectWorkflowsEnvelope {
+  repositoryOwner?: {
+    projectV2?: {
       workflows?: { nodes?: Array<WorkflowNode | null> | null } | null;
     } | null;
   } | null;
@@ -257,11 +265,11 @@ const VIEW_FIELD_NODE = `
   }
 `;
 
-async function readViewsAndWorkflows(
+async function readViews(
   client: GitHubGraphQlClient,
   owner: string,
   projectNumber: number,
-): Promise<{ project: NonNullable<NonNullable<ProjectViewsEnvelope["repositoryOwner"]>["projectV2"]>; views: FoundationView[]; workflows: FoundationWorkflow[] }> {
+): Promise<{ project: NonNullable<NonNullable<ProjectViewsEnvelope["repositoryOwner"]>["projectV2"]>; views: FoundationView[] }> {
   const data = await client.request<ProjectViewsEnvelope>(
     `query($login: String!, $number: Int!) {
       repositoryOwner(login: $login) {
@@ -276,7 +284,6 @@ async function readViewsAndWorkflows(
                 verticalGroupByFields(first: 5) { ${VIEW_FIELD_NODE} }
               }
             }
-            workflows(first: 100) { nodes { id number name enabled } }
           }
         }
         ... on User {
@@ -290,7 +297,6 @@ async function readViewsAndWorkflows(
                 verticalGroupByFields(first: 5) { ${VIEW_FIELD_NODE} }
               }
             }
-            workflows(first: 100) { nodes { id number name enabled } }
           }
         }
       }
@@ -313,11 +319,37 @@ async function readViewsAndWorkflows(
           verticalGroupByFields: namedNodes(view.verticalGroupByFields),
         }]
       : []);
-  const workflows = (project.workflows?.nodes ?? []).flatMap((workflow) =>
+  return { project, views };
+}
+
+async function readWorkflows(
+  client: GitHubGraphQlClient,
+  owner: string,
+  projectNumber: number,
+): Promise<FoundationWorkflow[]> {
+  const data = await client.request<ProjectWorkflowsEnvelope>(
+    `query($login: String!, $number: Int!) {
+      repositoryOwner(login: $login) {
+        ... on Organization {
+          projectV2(number: $number) {
+            workflows(first: 100) { nodes { id number name enabled } }
+          }
+        }
+        ... on User {
+          projectV2(number: $number) {
+            workflows(first: 100) { nodes { id number name enabled } }
+          }
+        }
+      }
+    }`,
+    { login: owner, number: projectNumber },
+  );
+  const project = data.repositoryOwner?.projectV2;
+  if (!project) throw new Error(`GitHub Project #${projectNumber} was not found.`);
+  return (project.workflows?.nodes ?? []).flatMap((workflow) =>
     workflow?.id && typeof workflow.number === "number" && workflow.name && typeof workflow.enabled === "boolean"
       ? [{ id: workflow.id, number: workflow.number, name: workflow.name, enabled: workflow.enabled }]
       : []);
-  return { project, views, workflows };
 }
 
 function errorMessage(error: unknown): string {
@@ -330,13 +362,16 @@ export async function inspectProjectOperatingFoundation(
   owner = TARGET_PROJECT.owner,
   projectNumber = TARGET_PROJECT.number,
 ): Promise<ProjectFoundationInspection> {
-  const [projectRaw, rawFields, restFieldResult, viewStateResult] = await Promise.all([
+  const [projectRaw, rawFields, restFieldResult, viewStateResult, workflowResult] = await Promise.all([
     getProject(graphQl, owner, projectNumber),
     listProjectFields(graphQl, owner, projectNumber),
     rest.request<RestProjectField[]>("GET", `/orgs/${encodeURIComponent(owner)}/projectsV2/${projectNumber}/fields?per_page=100`)
       .then((value) => ({ ok: true as const, value }))
       .catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) })),
-    readViewsAndWorkflows(graphQl, owner, projectNumber)
+    readViews(graphQl, owner, projectNumber)
+      .then((value) => ({ ok: true as const, value }))
+      .catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) })),
+    readWorkflows(graphQl, owner, projectNumber)
       .then((value) => ({ ok: true as const, value }))
       .catch((error: unknown) => ({ ok: false as const, error: errorMessage(error) })),
   ]);
@@ -377,10 +412,11 @@ export async function inspectProjectOperatingFoundation(
     },
     iteration: { exists: iteration !== null, field: iteration },
     views: viewStateResult.ok ? viewStateResult.value.views : [],
-    workflows: viewStateResult.ok ? viewStateResult.value.workflows : [],
+    workflows: workflowResult.ok ? workflowResult.value : [],
     access: {
       restFieldsReadable: restFieldResult.ok,
-      viewsAndWorkflowsReadable: viewStateResult.ok,
+      viewsReadable: viewStateResult.ok,
+      workflowsReadable: workflowResult.ok,
     },
     capabilityClassification: {
       iteration: "official-graphql-api",
@@ -394,7 +430,8 @@ export async function inspectProjectOperatingFoundation(
       "Ready-for-review automation must be installed in each source repository; this repository only documents the least-privilege template.",
       "Existing views are never replaced automatically; incompatible same-name views are reported for manual review.",
       ...(!restFieldResult.ok ? [`REST Project fields were not readable: ${restFieldResult.error}`] : []),
-      ...(!viewStateResult.ok ? [`Project views/workflows were not readable: ${viewStateResult.error}`] : []),
+      ...(!viewStateResult.ok ? [`Project views were not readable: ${viewStateResult.error}`] : []),
+      ...(!workflowResult.ok ? [`Project workflow details were not readable: ${workflowResult.error}`] : []),
     ],
   };
 }
@@ -418,11 +455,11 @@ export interface ViewPlan {
 }
 
 export function planProjectViews(inspection: ProjectFoundationInspection): ViewPlan[] {
-  if (!inspection.access.viewsAndWorkflowsReadable || !inspection.access.restFieldsReadable) {
+  if (!inspection.access.viewsReadable || !inspection.access.restFieldsReadable) {
     return DESIRED_VIEWS.map((spec) => ({
       spec,
       action: "blocked" as const,
-      reason: "view planning requires readable Project views/workflows and REST field IDs",
+      reason: "view planning requires readable Project views and REST field IDs",
       request: null,
     }));
   }
@@ -535,8 +572,8 @@ export async function applyProjectOperatingFoundation(
   assertProjectWriteAllowed(config, before.project.id);
   if (!before.priority.compatible) throw new Error("PRIORITY_INCOMPATIBLE: Existing Priority must be P0/P1/P2/P3 and is never recreated.");
   if (!before.status.compatible) throw new Error("STATUS_INCOMPATIBLE: Existing Status must be Backlog/Todo/In Progress/In Review/Done.");
-  if (!before.access.viewsAndWorkflowsReadable || !before.access.restFieldsReadable) {
-    throw new Error("PROJECT_VIEW_ACCESS_REQUIRED: Refusing to apply without readable views/workflows and REST field IDs.");
+  if (!before.access.viewsReadable || !before.access.restFieldsReadable) {
+    throw new Error("PROJECT_VIEW_ACCESS_REQUIRED: Refusing to apply without readable views and REST field IDs.");
   }
 
   const actions: string[] = ["preserved existing Priority field and options"];
