@@ -2,23 +2,25 @@
 
 Focused MCP server for GitHub Projects v2 team workflows.
 
-This repository is intentionally narrower than a general GitHub MCP server. It focuses on Projects metadata, fields, items, normalized team-state snapshots, and carefully gated project mutations.
+This repository is intentionally narrower than a general GitHub MCP server. It focuses on Projects metadata, fields, items, normalized team-state snapshots, workflow reconciliation, checkpoint/delta analysis, and carefully gated project mutations.
 
 ## Status
 
-**v0.1 / M1 complete**
+**v0.2 / M2 in progress**
 
-- Read-first GitHub Projects MCP
+- M1 local Projects MCP complete
+- Issue / Pull Request URL and Project-item resolution
+- Missing Status / assignee state-gap analysis
+- Pull Request merge ↔ Project Status reconciliation
+- Process-local Project state checkpoint / delta comparison
 - Owner / Project allowlists
 - Write tools disabled by default
 - No delete tools
 - stdio transport first
-- Real Project read/write integration validated
-- Remote HTTP + OAuth planned next
 
-## Initial MCP tools
+## MCP tools
 
-### Read-only
+### GitHub read-only
 
 | Tool | Purpose |
 | --- | --- |
@@ -26,17 +28,34 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 | `get_github_project` | Read one Project by owner + project number |
 | `list_github_project_fields` | Read Status, Priority, Iteration and other fields/options |
 | `list_github_project_items` | Read issues, PRs, draft items and field values |
+| `resolve_github_issue_or_pr_url` | Resolve a GitHub Issue/PR URL to stable content metadata and node ID |
+| `resolve_github_project_item` | Resolve an Issue/PR URL to its matching Project item with cursor pagination |
 | `get_github_project_snapshot` | Normalize project state for AI analysis |
+| `analyze_github_project_state_gaps` | Detect missing Status and missing assignee state gaps |
+| `analyze_github_project_reconciliation` | Detect PR merge ↔ Project Status mismatches |
+| `compare_github_project_state_checkpoint` | Compare current Project state with the latest process-local checkpoint without replacing it |
 | `get_github_project_brief_context` | Return snapshot + team-brief interpretation contract |
 
-### Write — disabled by default
+### Local checkpoint state
+
+| Tool | Purpose |
+| --- | --- |
+| `create_github_project_state_checkpoint` | Capture the current allowed Project snapshot as the process-local comparison baseline |
+
+Creating a checkpoint **does not write to GitHub**. It updates only MCP process memory, replacing the previous checkpoint for the same owner + Project number. The checkpoint does not survive an MCP server restart.
+
+A comparison can report Status, Priority, assignee, repository state, merge state, archive state, custom field, metadata, and snapshot-membership changes. Comparison does not silently replace the baseline; create a new checkpoint explicitly when the current state should become the new baseline.
+
+Current normalized snapshots request at most 100 items. When a snapshot returns exactly the requested limit, the checkpoint marks coverage as potentially incomplete. Attribute changes for matching Project item IDs remain useful, but entered/left snapshot membership is reported as an observation rather than authoritative proof that an item was added to or removed from the Project. This avoids overstating results until snapshot pagination is implemented.
+
+### GitHub write — disabled by default
 
 | Tool | Purpose |
 | --- | --- |
 | `add_github_project_item` | Add an existing Issue/PR node to a Project |
 | `update_github_project_item_field` | Update text/number/date/single-select/multi-select/iteration fields |
 
-There are intentionally **no delete tools in v0.1**.
+There are intentionally **no delete tools**.
 
 ## Why a dedicated Projects MCP?
 
@@ -64,7 +83,7 @@ General GitHub tooling can continue to handle repository code, Issues, Pull Requ
 
 For organization Projects, use a fine-grained token with the minimum required **Projects** organization permission:
 
-- `read` for the read-only tools
+- `read` for GitHub read/analysis/checkpoint workflows
 - `write` only when mutation tools are intentionally enabled
 
 Your GitHub organization may require approval for fine-grained personal access tokens.
@@ -116,6 +135,35 @@ The second command reads project metadata, fields, items, and a normalized snaps
 
 The read path was integration-tested against `gyuniverse-hq` Project #2 on 2026-09-05. Project listing, metadata, fields, items, and snapshot normalization all completed successfully with a fine-grained read-only token.
 
+## Checkpoint / delta workflow
+
+With the MCP running, create a baseline:
+
+```text
+Create a state checkpoint for Project #2 under gyuniverse-hq.
+```
+
+After Project state changes, compare against that same baseline:
+
+```text
+Compare Project #2 with its latest checkpoint and show only what changed.
+```
+
+Useful delta categories include:
+
+- `status_changed`
+- `priority_changed`
+- `assignees_changed`
+- `repository_state_changed`
+- `merged_changed`
+- `archived_changed`
+- `field_changed`
+- `item_metadata_changed`
+- `item_entered_snapshot`
+- `item_left_snapshot`
+
+Checkpoint storage is intentionally process-local in the current M2 implementation. Persistent checkpoint storage would introduce a new storage/backend concern and is deferred until a later milestone explicitly requires it.
+
 ## Gated write integration smoke test
 
 Use the single-select smoke command only for a non-critical item after all three write boundaries are deliberately configured: the token has Projects write permission, the target Project node ID is explicitly allowlisted, and `GITHUB_PROJECTS_WRITE_ENABLED=true`.
@@ -144,18 +192,22 @@ For **read operations**, this is optional. When empty, all Projects under an all
 
 For **write operations**, this is mandatory. Mutation tools fail closed unless at least one explicit ProjectV2 node ID is configured, and the target Project node ID must be present in that allowlist.
 
+Checkpoint creation and comparison use the same read-side owner/Project validation before capturing current state.
+
 ### Write gate
 
 ```dotenv
 GITHUB_PROJECTS_WRITE_ENABLED=false
 ```
 
-Mutation tools fail closed unless this is explicitly changed to `true`.
+GitHub mutation tools fail closed unless this is explicitly changed to `true`.
 
-A write therefore requires **both**:
+A GitHub write therefore requires **both**:
 
 1. `GITHUB_PROJECTS_WRITE_ENABLED=true`
 2. the target Project node ID in `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
+
+The checkpoint tools do not use or bypass the GitHub write gate because they never mutate GitHub state.
 
 ## CI validation
 
@@ -187,6 +239,10 @@ Create a current-state brief for Project #3. Separate In Progress, Assigned Work
 Unassigned Work, Done, and State Gaps. Do not treat an open PR as completed work.
 ```
 
+```text
+Create a checkpoint for Project #2, then later compare the current state with that checkpoint.
+```
+
 Later, with write mode deliberately enabled:
 
 ```text
@@ -202,9 +258,16 @@ src/
 ├── config.ts
 ├── github/
 │   ├── graphql-client.ts
-│   └── projects.ts
+│   ├── project-items.ts
+│   ├── projects.ts
+│   └── references.ts
+├── workflow/
+│   ├── checkpoint.ts
+│   ├── reconciliation.ts
+│   └── state-gaps.ts
 └── mcp/
     ├── build-server.ts
+    ├── checkpoint-tools.ts
     └── stdio.ts
 ```
 
@@ -230,16 +293,17 @@ src/
 
 ### M1.1 — scale backlog
 
-- [ ] pagination beyond first 100 items
+- [ ] pagination beyond first 100 normalized snapshot items
 
-This is not a v0.1 release blocker for the current Gyuniverse Project size; it should be implemented before relying on the server for Projects that can exceed the first 100 returned items.
+This is not a v0.1 release blocker for the current Gyuniverse Project size; it should be implemented before treating snapshot-wide membership analysis as exhaustive for Projects that can exceed the first 100 returned items.
 
 ### M2 — workflow intelligence
 
-- [ ] Issue / PR URL → node ID resolver
-- [ ] missing assignee / missing status detection
-- [ ] PR merge ↔ Project status reconciliation
-- [ ] project state checkpoint / delta
+- [x] Issue / PR URL → node ID resolver
+- [x] Issue / PR URL → Project item resolver with cursor pagination
+- [x] missing assignee / missing status detection
+- [x] PR merge ↔ Project status reconciliation
+- [x] project state checkpoint / delta
 - [ ] safer high-level Status / Priority mutation tools
 - [ ] write audit log
 
@@ -260,6 +324,8 @@ This is not a v0.1 release blocker for the current Gyuniverse Project size; it s
 ## Security
 
 Never commit GitHub tokens or `.env` files. Keep write permissions disabled except during a concrete, allowlisted mutation workflow against an intended Project item.
+
+Checkpoint data can contain Project titles, repository names, assignees, field values, and URLs. In the current implementation it remains in the MCP server process only and is not written to a new external storage system.
 
 ## License
 
