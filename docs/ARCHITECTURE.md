@@ -4,6 +4,8 @@
 
 `gyuniverse-github-projects-mcp` is a focused MCP server for GitHub Projects v2. It intentionally does not reimplement the whole GitHub API. Repository code, Issues, Pull Requests, Actions, and review workflows can continue to use existing GitHub tooling; this server owns the Projects-specific team-state and workflow layer.
 
+> Architecture V2 is tracked in `docs/ARCHITECTURE_V2.md`. The V2 direction preserves this working Remote MCP surface while extracting shared business logic behind MCP and REST/GPT Actions adapters.
+
 ## Local and remote entry points
 
 The same MCP tool surface is built by `src/mcp/build-server.ts` and can be reached through two different transport boundaries.
@@ -250,9 +252,10 @@ The following are currently process-local:
 
 - Project checkpoint baselines
 - write audit entries
-- OAuth consumed authorization-code replay state
 
-Checkpoint and audit loss on restart is an accepted current product limitation. Authorization-code replay state has stronger security semantics and therefore directly affects the acceptable production deployment topology.
+OAuth authorization-code replay state is shared through Upstash in production.
+
+Checkpoint and audit loss on restart is an accepted current product limitation. Persistent checkpoint / audit are explicitly planned in the V2 roadmap before they are treated as authoritative history.
 
 ## Design principles
 
@@ -271,6 +274,8 @@ Checkpoint and audit loss on restart is an accepted current product limitation. 
 13. **Bounded audit metadata**: process-local write audit records operation/target/outcome/verification metadata without storing tokens, Authorization headers, or arbitrary raw mutation payloads.
 14. **Provider-neutral remote core**: OAuth and MCP authorization semantics live outside any hosting adapter.
 15. **Fail closed on deployment uncertainty**: multi-instance replay semantics must be solved explicitly before claiming production-safe distributed OAuth deployment.
+16. **Shared-Core V2**: MCP and REST/GPT Actions should be sibling adapters over one business-logic core, never chained transports.
+17. **Identity before broad writes**: team-code approval is not individual identity; operation-level authorization is required before expanding remote write access.
 
 ## Current tool surface
 
@@ -306,7 +311,7 @@ Lower-level compatibility tools:
 
 - normalized snapshot-wide analysis is still bounded by the first 100 returned Project items; the pagination-aware single-item resolver is exhaustive within configured page limits
 - real write integration tests require an intentionally write-capable GitHub credential, explicit Project allowlist, and write gate; CI remains secret-free and does not run write smoke tests
-- the Vercel runtime adapter exists, but the Vercel project and Upstash resource are not yet provisioned
-- live ChatGPT/Claude connection tests require a reachable deployed HTTPS endpoint and deployment secrets
 - checkpoint and write-audit state remain process-local even though OAuth replay state is shared
+- individual user identity / ACL is not implemented yet; `MCP_OAUTH_TEAM_CODE` remains a shared approval gate
+- Project #2 operating fields/views/native automations are the next milestone
 - Draft PR → Ready for review, merge, release, actual deployment, credential provisioning, and external auth-provider adoption remain human-governance / architecture boundaries
