@@ -331,7 +331,7 @@ async function handleAuthorizationCode(form: FormData): Promise<Response> {
 
   const actualChallenge = await sha256Base64Url(codeVerifier);
   if (actualChallenge !== payload.codeChallenge) return tokenError("invalid_grant", "PKCE verification failed.");
-  if (!authorizationCodeReplayStore.consume(code, payload.exp)) {
+  if (!(await authorizationCodeReplayStore.consume(code, payload.exp))) {
     return tokenError("invalid_grant", "Authorization code has already been used.");
   }
 
