@@ -7,6 +7,8 @@ import {
   assertProjectWriteAllowed,
 } from "../config.js";
 import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
+import { SnapshotService } from "../core/snapshots/snapshot-service.js";
+import { WorkflowService } from "../core/workflow/workflow-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { findProjectItemByContentId } from "../github/project-items.js";
 import {
@@ -17,8 +19,6 @@ import {
   parseGitHubIssueOrPullRequestUrl,
   resolveGitHubIssueOrPullRequest,
 } from "../github/references.js";
-import { analyzeProjectReconciliation } from "../workflow/reconciliation.js";
-import { analyzeProjectStateGaps } from "../workflow/state-gaps.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
 import { registerWorkflowWriteTools, writeAuditLog } from "./workflow-write-tools.js";
 
@@ -38,6 +38,8 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   });
 
   const projectService = new ProjectService({ config, client });
+  const snapshotService = new SnapshotService(projectService);
+  const workflowService = new WorkflowService(snapshotService);
   const resolveProject = projectService.resolveProject.bind(projectService);
 
   registerCheckpointTools({ server, client, resolveProject, json });
@@ -143,7 +145,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, first }) => json(await projectService.getProjectSnapshot(owner, number, first)),
+    async ({ owner, number, first }) => json(await snapshotService.getSnapshot(owner, number, first)),
   );
 
   server.registerTool(
@@ -171,25 +173,13 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       completedStatusNames,
       includeArchived,
       includeCompletedForAssignee,
-    }) => {
-      const snapshot = await projectService.getProjectSnapshot(owner, number, first) as Parameters<typeof analyzeProjectStateGaps>[0];
-      const analysis = analyzeProjectStateGaps(snapshot, {
-        statusFieldName,
-        assigneeFieldNames,
-        completedStatusNames,
-        includeArchived,
-        includeCompletedForAssignee,
-      });
-      return json({
-        ...analysis,
-        coverage: {
-          requestedItems: first,
-          returnedItems: snapshot.itemCount ?? 0,
-          completeBeyondFirstPage: false,
-          note: "State-gap analysis currently uses the normalized snapshot path, which is bounded by the requested first value (max 100). Use the pagination-aware Project item resolver for exhaustive single-item lookup.",
-        },
-      });
-    },
+    }) => json(await workflowService.analyzeStateGaps(owner, number, first, {
+      statusFieldName,
+      assigneeFieldNames,
+      completedStatusNames,
+      includeArchived,
+      includeCompletedForAssignee,
+    })),
   );
 
   server.registerTool(
@@ -215,24 +205,12 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       completedStatusNames,
       includeArchived,
       reportDoneButNotMerged,
-    }) => {
-      const snapshot = await projectService.getProjectSnapshot(owner, number, first) as Parameters<typeof analyzeProjectReconciliation>[0];
-      const analysis = analyzeProjectReconciliation(snapshot, {
-        statusFieldName,
-        completedStatusNames,
-        includeArchived,
-        reportDoneButNotMerged,
-      });
-      return json({
-        ...analysis,
-        coverage: {
-          requestedItems: first,
-          returnedItems: snapshot.itemCount ?? 0,
-          completeBeyondFirstPage: false,
-          note: "Reconciliation currently uses the normalized snapshot path, which is bounded by the requested first value (max 100).",
-        },
-      });
-    },
+    }) => json(await workflowService.analyzeReconciliation(owner, number, first, {
+      statusFieldName,
+      completedStatusNames,
+      includeArchived,
+      reportDoneButNotMerged,
+    })),
   );
 
   server.registerTool(
@@ -246,30 +224,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, first }) => {
-      const snapshot = await projectService.getProjectSnapshot(owner, number, first);
-      return json({
-        snapshot,
-        contract: {
-          sections: [
-            "Project Overview",
-            "In Progress",
-            "Assigned Work",
-            "Unassigned Work",
-            "Blocked or At Risk",
-            "Review or Merge Candidates",
-            "Done",
-            "State Gaps",
-          ],
-          rules: [
-            "Project field values are workflow state, not proof that implementation is complete.",
-            "Do not infer Done from an intention, assignment, or open pull request.",
-            "Surface missing assignees, missing status, and inconsistent item/repository state as State Gaps.",
-            "Preserve repository, issue/PR number, URL, assignee, status, priority, and iteration as evidence when present.",
-          ],
-        },
-      });
-    },
+    async ({ owner, number, first }) => json(await workflowService.getBriefContext(owner, number, first)),
   );
 
   server.registerTool(
