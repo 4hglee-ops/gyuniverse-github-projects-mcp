@@ -24,6 +24,7 @@ import {
 } from "../github/references.js";
 import { analyzeProjectReconciliation } from "../workflow/reconciliation.js";
 import { analyzeProjectStateGaps } from "../workflow/state-gaps.js";
+import { registerCheckpointTools } from "./checkpoint-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -55,6 +56,8 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
     assertProjectAllowed(config, projectIdOf(project));
     return project;
   }
+
+  registerCheckpointTools({ server, client, resolveProject, json });
 
   server.registerTool(
     "list_github_projects",
