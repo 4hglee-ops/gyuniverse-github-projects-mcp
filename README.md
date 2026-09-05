@@ -2,23 +2,23 @@
 
 Focused MCP server for safe GitHub Projects v2 team workflows.
 
-This repository is intentionally narrower than a general GitHub MCP server. It focuses on Projects metadata, fields, items, normalized team-state snapshots, workflow reconciliation, checkpoint/delta analysis, guarded workflow mutations, and write auditing.
+This repository is intentionally narrower than a general GitHub MCP server. It focuses on Projects metadata, fields, items, normalized team-state snapshots, workflow reconciliation, checkpoint/delta analysis, guarded workflow mutations, write auditing, and an authenticated remote MCP surface.
 
 ## Status
 
-**v0.2 / M2 implementation complete on Draft PR**
+**v0.2 / M2 implementation complete + M3 remote core in Draft PR**
 
 - M1 local Projects MCP complete
-- Issue / Pull Request URL and Project-item resolution
-- Missing Status / assignee state-gap analysis
-- Pull Request merge ↔ Project Status reconciliation
-- Process-local Project state checkpoint / delta comparison
-- High-level guarded Status / Priority mutation tools
-- Process-local bounded write audit log
-- Owner / Project allowlists
-- Write tools disabled by default
+- M2 workflow intelligence complete
+- Remote HTTP request router implemented
+- OAuth protected-resource / authorization-server discovery implemented
+- Public PKCE client registration and authorization flow implemented
+- ChatGPT / Claude callback allowlist support
+- OAuth `projects:read` / `projects:write` separation
+- GitHub credential remains server-side only
+- Remote writes require OAuth write scope **and** the existing server-side write gates
+- Deployment adapter / production deployment not selected yet
 - No delete tools
-- stdio transport first
 
 ## MCP tools
 
@@ -86,16 +86,16 @@ The high-level Status/Priority tools should be preferred for AI workflows becaus
 ```text
 ChatGPT / Claude / Codex
           |
-    +-----+-------------------+
-    |                         |
-Discord Bridge        GitHub Projects MCP
-    |                         |
-team conversation       project workflow state
-    |                         |
-    +-----------+-------------+
-                |
-          Team Context
+          | OAuth access token
+          v
+ Remote GitHub Projects MCP
+          |
+          | server-side GitHub credential
+          v
+   GitHub Projects v2 API
 ```
+
+The OAuth token issued to an AI client is **not** the GitHub PAT / GitHub App credential. The GitHub credential remains on the server and is never returned through OAuth.
 
 General GitHub tooling can continue to handle repository code, Issues, Pull Requests, reviews, and Actions. This server owns the Projects-specific workflow/state layer.
 
@@ -112,7 +112,7 @@ For organization Projects, use a fine-grained token with the minimum required **
 
 Your GitHub organization may require approval for fine-grained personal access tokens.
 
-## Setup
+## Local setup
 
 ```bash
 git clone https://github.com/4hglee-ops/gyuniverse-github-projects-mcp.git
@@ -121,7 +121,7 @@ pnpm install
 cp .env.example .env
 ```
 
-Configure `.env`:
+Local stdio configuration:
 
 ```dotenv
 GITHUB_TOKEN=github_pat_...
@@ -140,6 +140,122 @@ pnpm start
 ```
 
 Use `pnpm mcp:stdio` during development when you want to run directly from TypeScript.
+
+## Remote MCP core
+
+M3 adds a platform-neutral Fetch `Request -> Response` router in `src/http/router.ts`.
+
+Current routes:
+
+| Route | Purpose |
+| --- | --- |
+| `/mcp` | OAuth-protected Streamable HTTP MCP endpoint |
+| `/.well-known/oauth-protected-resource` | Protected resource metadata |
+| `/.well-known/oauth-authorization-server` | OAuth authorization-server metadata |
+| `/.well-known/openid-configuration` | Compatibility metadata alias |
+| `/oauth/register` | Dynamic registration for supported public PKCE clients |
+| `/oauth/authorize` | Human approval + authorization code issuance |
+| `/oauth/token` | Authorization-code / refresh-token exchange |
+| `/health` | Minimal health response |
+
+The core router intentionally does not choose a hosting provider. A deployment-specific adapter can forward incoming Requests to `handleRemoteHttpRequest()` after the deployment architecture is selected.
+
+### Remote OAuth configuration
+
+In addition to the existing GitHub configuration:
+
+```dotenv
+PUBLIC_BASE_URL=https://projects-mcp.example.com
+MCP_OAUTH_TEAM_CODE=...
+MCP_OAUTH_SIGNING_SECRET=...
+MCP_OAUTH_WRITE_ENABLED=false
+```
+
+Real values belong in the deployment secret store and must not be committed.
+
+### OAuth scopes
+
+Default remote scope:
+
+```text
+projects:read
+```
+
+Optional write scope:
+
+```text
+projects:write
+```
+
+`projects:write` is not advertised or accepted unless:
+
+```dotenv
+MCP_OAUTH_WRITE_ENABLED=true
+```
+
+Even then, an OAuth write token **does not by itself permit a GitHub mutation**.
+
+A remote mutation requires all of these boundaries simultaneously:
+
+1. `MCP_OAUTH_WRITE_ENABLED=true`
+2. the OAuth access token includes `projects:write`
+3. `GITHUB_PROJECTS_WRITE_ENABLED=true`
+4. the target Project node ID is explicitly present in `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
+5. the individual mutation's existing validation / membership / verification checks succeed
+
+This means a read-only OAuth token forces `writeEnabled=false` for that request even if the server's GitHub write gate is globally enabled.
+
+### OAuth flow
+
+The current compatibility path supports public PKCE clients:
+
+```text
+Client
+  |
+  | protected-resource discovery
+  v
+Authorization server metadata
+  |
+  | dynamic registration
+  v
+/oauth/register
+  |
+  | authorization + PKCE S256 + resource + scope
+  v
+/oauth/authorize
+  |
+  | human team-code approval
+  v
+short-lived signed authorization code
+  |
+  | code_verifier
+  v
+/oauth/token
+  |
+  v
+short-lived MCP OAuth access token
+  |
+  v
+/mcp
+```
+
+Supported redirect URI families are deliberately allowlisted for ChatGPT, Claude, and localhost development. Arbitrary redirect origins are rejected.
+
+Authorization codes expire after two minutes. Access tokens expire after one hour. Refresh tokens expire after 30 days.
+
+### Current replay-protection limitation
+
+Authorization-code replay prevention currently uses a bounded **process-local consumed-code store** in the OAuth endpoint layer.
+
+That is sufficient for a single long-lived process, but it must **not** be assumed to provide global one-time-code semantics across multiple independent serverless instances or horizontally scaled workers.
+
+Therefore production deployment topology is intentionally not hidden behind the current implementation. Before multi-instance/serverless production deployment, choose one of:
+
+- a single-instance/affine runtime with explicitly accepted availability/scaling limits
+- a shared replay/grant store
+- an external standards-compliant authorization service
+
+Introducing shared storage or another auth provider is a separate architecture/integration decision.
 
 ## Read-only integration smoke test
 
@@ -168,28 +284,17 @@ Later:
 Compare Project #2 with its latest checkpoint and show only what changed.
 ```
 
-Useful delta categories include:
-
-- `status_changed`
-- `priority_changed`
-- `assignees_changed`
-- `repository_state_changed`
-- `merged_changed`
-- `archived_changed`
-- `field_changed`
-- `item_metadata_changed`
-- `item_entered_snapshot`
-- `item_left_snapshot`
-
 Checkpoint storage is intentionally process-local. Persistent storage is a separate architecture decision.
 
 ## Guarded write workflow
 
-Write operations require all of the following:
+Local/server-side GitHub write operations require all of the following:
 
-1. the token has the minimum required Projects write permission
+1. the GitHub credential has the minimum required Projects write permission
 2. the target Project node ID is explicitly present in `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
 3. `GITHUB_PROJECTS_WRITE_ENABLED=true`
+
+Remote write additionally requires the OAuth write boundary described above.
 
 Example high-level request:
 
@@ -208,8 +313,6 @@ pnpm smoke:update-single-select -- <project-id> <item-id> <field-id> <option-id>
 ```
 
 Use the minimum mutation count necessary to prove behavior, then restore `GITHUB_PROJECTS_WRITE_ENABLED=false` and reduce the token back to read-only when no further write verification is planned.
-
-The M1 write path was integration-tested against a non-critical item in `gyuniverse-hq` Project #2 on 2026-09-05. The new M2 high-level Status/Priority path is covered by secret-free contract/unit tests and CI; a new real mutation is not performed automatically merely because the earlier smoke test succeeded.
 
 ## Write audit log
 
@@ -239,15 +342,19 @@ This is an operational audit aid, not durable compliance logging.
 
 `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS` is optional for reads. For writes it is mandatory and fail-closed.
 
-### Write gate
+### GitHub write gate
 
 ```dotenv
 GITHUB_PROJECTS_WRITE_ENABLED=false
 ```
 
-GitHub mutation tools fail closed unless deliberately changed to `true`.
+### Remote OAuth write gate
 
-A GitHub write therefore requires both the explicit write gate and an explicit Project allowlist match.
+```dotenv
+MCP_OAUTH_WRITE_ENABLED=false
+```
+
+Remote writes require both gates, the OAuth write scope, the explicit Project allowlist, and the normal mutation validation path.
 
 Checkpoint tools and write-audit reads do not bypass or activate GitHub writes.
 
@@ -262,7 +369,7 @@ pnpm build
 pnpm test
 ```
 
-CI remains secret-free; write smoke tests do not run automatically.
+CI remains secret-free; write smoke tests and deployment do not run automatically.
 
 ## Current architecture
 
@@ -276,6 +383,12 @@ src/
 │   ├── project-items.ts
 │   ├── projects.ts
 │   └── references.ts
+├── http/
+│   ├── remote-mcp.ts
+│   └── router.ts
+├── oauth/
+│   ├── endpoints.ts
+│   └── stateless.ts
 ├── workflow/
 │   ├── checkpoint.ts
 │   ├── reconciliation.ts
@@ -305,8 +418,6 @@ src/
 
 - [ ] pagination beyond first 100 normalized snapshot items
 
-This should be implemented before treating snapshot-wide membership analysis as exhaustive for Projects that can exceed the first 100 returned items.
-
 ### M2 — workflow intelligence ✅ implementation complete
 
 - [x] Issue / PR URL → node ID resolver
@@ -317,13 +428,21 @@ This should be implemented before treating snapshot-wide membership analysis as 
 - [x] safer high-level Status / Priority mutation tools
 - [x] bounded process-local write audit log
 
-### M3 — remote MCP
+### M3 — remote MCP ◐ core implemented / deployment decision pending
 
-- [ ] HTTP transport
-- [ ] OAuth / protected resource metadata
-- [ ] ChatGPT connection
-- [ ] Claude connection
-- [ ] deployment
+- [x] platform-neutral HTTP MCP request handler
+- [x] OAuth protected-resource metadata
+- [x] OAuth authorization-server metadata
+- [x] PKCE + dynamic client registration compatibility path
+- [x] ChatGPT / Claude redirect allowlist
+- [x] OAuth read/write scope separation
+- [x] remote write defense-in-depth
+- [x] secret-free OAuth/HTTP regression tests
+- [ ] deployment runtime / topology decision
+- [ ] deployment adapter
+- [ ] production secret configuration
+- [ ] live ChatGPT connection smoke test
+- [ ] live Claude connection smoke test
 
 ### M4 — Gyuniverse cross-context
 
@@ -333,9 +452,11 @@ This should be implemented before treating snapshot-wide membership analysis as 
 
 ## Security
 
-Never commit GitHub tokens or `.env` files. Keep write permissions disabled except during a concrete, allowlisted mutation workflow against an intended Project item.
+Never commit GitHub tokens, OAuth signing secrets, team codes, or `.env` files.
 
-Checkpoint data and write audit records remain process-local in M2. Introducing persistent storage, OAuth, GitHub App migration, remote deployment, Jira, Discord, or Notion integration is a separate architecture/integration boundary.
+The client-facing MCP OAuth token and the server-side GitHub credential are separate credentials with separate purposes. OAuth access must never expose or substitute for the GitHub token.
+
+Checkpoint data, write audit records, and the current authorization-code replay cache are process-local. Their lifetime and correctness characteristics must be considered when selecting a production deployment topology.
 
 ## License
 
