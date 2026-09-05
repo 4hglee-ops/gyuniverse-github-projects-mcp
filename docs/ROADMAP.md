@@ -9,7 +9,7 @@
 | M4 Project Operating Foundation | Complete | Priority / Views / Native automation / no-sprint continuous flow |
 | M5 Shared Core | Complete | Separate transport from business logic |
 | M6 High-level Read | Complete | Brief / My Work / Backlog / Review / Blockers / Changes |
-| M7 Identity Foundation | Planned | Individual identity + permission model |
+| M7 Identity Foundation | In progress | Individual identity + permission model |
 | M8 High-level Write | Planned | Semantic write + idempotency + verify + audit |
 | M9 REST / GPT Actions | Planned | Operator GPT read/write adapter |
 | M10 Advanced Governance | Planned | Durable state / Bulk / Sub-issue / Dependency |
@@ -112,16 +112,35 @@ M6 rules:
 - treat entered/left membership deltas as authoritative only when both checkpoint windows are complete
 - checkpoint storage remains process-local; durable persistence remains M10
 
-## M7
+## M7 ◐
 Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
+
+### Current slice
+- [x] Add `AuthenticatedPrincipal`, `ProjectRole`, and `ProjectPermission` models
+- [x] Define Admin / Member / Viewer permission matrix
+- [x] Add `IdentityPolicy` permission checks
+- [x] Make `WritePolicy` principal-aware while retaining existing server write gate and Project allowlist
+- [x] Pass OAuth request principal into the Shared Core write boundary
+- [x] Preserve legacy shared-team OAuth compatibility during the migration
+- [ ] Replace shared-team OAuth subject with individual subjects
+- [ ] Add per-user role / membership resolution
+- [ ] Propagate actor identity into mutation audit records
+- [ ] Make authenticated identity authoritative for `get_my_work`
+- [ ] Remove legacy shared-team write authorization after migration
 
 Target role shape:
 - Admin / PM: broad Project read/write within policy
 - Member: selected writes according to permission policy
 - Viewer: read-only
 
-Multiple authorized users may receive write permissions. The server credential is the
-backend capability; Identity / ACL decides which user may invoke which operation.
+Current permission baseline:
+- Admin: Project read/write + add item + generic field/status/priority writes
+- Member: Project read/write + add item + status/priority writes; no unrestricted generic field mutation
+- Viewer: Project read-only
+
+Multiple authorized users may receive write permissions. The server credential remains
+the backend capability; authenticated Identity / ACL decides which user may invoke
+which operation.
 
 ## M8
 High-level writes:

@@ -2,6 +2,11 @@ import {
   type AppConfig,
   assertProjectWriteAllowed,
 } from "../../config.js";
+import { IdentityPolicy } from "../identity/identity-policy.js";
+import type {
+  AuthenticatedPrincipal,
+  ProjectPermission,
+} from "../identity/principal.js";
 
 export type WriteOperation =
   | "add_project_item"
@@ -9,10 +14,16 @@ export type WriteOperation =
   | "update_status"
   | "update_priority";
 
+const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
+  add_project_item: "item.add",
+  update_project_item_field: "item.update_field",
+  update_status: "item.update_status",
+  update_priority: "item.update_priority",
+};
+
 export interface WritePolicyRequest {
   operation: WriteOperation;
   projectId: string;
-  actorId?: string | null;
 }
 
 export interface WritePolicyDecision {
@@ -20,34 +31,44 @@ export interface WritePolicyDecision {
   operation: WriteOperation;
   projectId: string;
   actorId: string | null;
-  identityEnforced: false;
-  controls: readonly [
-    "global-write-gate",
-    "explicit-project-allowlist",
-  ];
+  identityEnforced: boolean;
+  permission: ProjectPermission;
+  controls: readonly string[];
 }
 
-/**
- * Shared authorization boundary for GitHub Project mutations.
- *
- * M5 centralizes the current server-level write controls here without pretending
- * that individual user authorization already exists. M7 can extend this boundary
- * with authenticated identity, membership, role, and operation permissions while
- * MCP and future REST adapters keep calling the same policy object.
- */
+/** Shared authorization boundary for GitHub Project mutations. */
 export class WritePolicy {
-  constructor(private readonly config: AppConfig) {}
+  private readonly identity = new IdentityPolicy();
+
+  constructor(
+    private readonly config: AppConfig,
+    private readonly principal: AuthenticatedPrincipal | null = null,
+  ) {}
 
   authorize(request: WritePolicyRequest): WritePolicyDecision {
     assertProjectWriteAllowed(this.config, request.projectId);
+    const permission = OPERATION_PERMISSION[request.operation];
+
+    if (this.principal) {
+      this.identity.assertPermission(this.principal, "project.write");
+      this.identity.assertPermission(this.principal, permission);
+    }
 
     return {
       allowed: true,
       operation: request.operation,
       projectId: request.projectId,
-      actorId: request.actorId ?? null,
-      identityEnforced: false,
-      controls: ["global-write-gate", "explicit-project-allowlist"],
+      actorId: this.principal?.id ?? null,
+      identityEnforced: Boolean(this.principal),
+      permission,
+      controls: this.principal
+        ? [
+            "global-write-gate",
+            "explicit-project-allowlist",
+            "authenticated-principal",
+            "operation-permission",
+          ]
+        : ["global-write-gate", "explicit-project-allowlist"],
     };
   }
 }

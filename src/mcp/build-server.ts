@@ -4,6 +4,7 @@ import { z } from "zod";
 import { type AppConfig } from "../config.js";
 import { AuditService } from "../core/audit/audit-service.js";
 import { ProjectChangeService } from "../core/changes/project-change-service.js";
+import type { AuthenticatedPrincipal } from "../core/identity/principal.js";
 import { ProjectMutationService } from "../core/mutations/project-mutation-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
@@ -19,13 +20,14 @@ import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
 export interface BuildServerOptions {
   config: AppConfig;
   client: GitHubGraphQlClient;
+  principal?: AuthenticatedPrincipal | null;
 }
 
 function json(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
-export function buildMcpServer({ config, client }: BuildServerOptions): McpServer {
+export function buildMcpServer({ config, client, principal = null }: BuildServerOptions): McpServer {
   const server = new McpServer({ name: "gyuniverse-github-projects-mcp", version: "0.2.0" });
 
   const projectService = new ProjectService({ config, client });
@@ -34,7 +36,7 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   const highLevelReadService = new HighLevelReadService(snapshotService);
   const changeService = new ProjectChangeService(snapshotService);
   const workItemService = new WorkItemService({ config, client, projects: projectService });
-  const writePolicy = new WritePolicy(config);
+  const writePolicy = new WritePolicy(config, principal);
   const auditService = new AuditService(200);
   const mutationService = new ProjectMutationService({ client, writePolicy, auditService });
   const resolveProject = projectService.resolveProject.bind(projectService);

@@ -1,6 +1,7 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { type AppConfig, loadConfig } from "../config.js";
+import { principalForRole } from "../core/identity/principal.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { buildMcpServer } from "../mcp/build-server.js";
 import {
@@ -47,6 +48,19 @@ export async function handleRemoteMcpRequest(
   const baseConfig = options?.config ?? loadConfig();
   const effectiveConfig = configForRemoteScope(baseConfig, access.scope);
   const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
-  const handler = createMcpHandler(() => buildMcpServer({ config: effectiveConfig, client }));
+
+  // M7 first slice: preserve the current shared-team OAuth subject while making
+  // principal/permission checks real at the Shared Core boundary. A write-scoped
+  // legacy team token keeps the pre-M7 write surface for compatibility. Individual
+  // subjects and per-user roles replace this shared principal in the next M7 slice.
+  const principal = scopeIncludes(access.scope, OAUTH_WRITE_SCOPE)
+    ? principalForRole(access.sub, "admin", { source: "oauth", displayName: "Legacy team OAuth principal" })
+    : principalForRole(access.sub, "viewer", { source: "oauth", displayName: "Legacy team OAuth principal" });
+
+  const handler = createMcpHandler(() => buildMcpServer({
+    config: effectiveConfig,
+    client,
+    principal,
+  }));
   return handler.fetch(request);
 }
