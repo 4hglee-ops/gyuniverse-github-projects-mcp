@@ -2,45 +2,41 @@
 
 ## Decision
 
-M3 remote MCP initial deployment target:
+The production target is Vercel Functions with an Upstash Redis replay store.
+The long-lived Node.js HTTP process remains supported for local development and
+single-instance hosting.
 
-- long-lived Node.js HTTP process
-- single active instance initially
-- explicit scaling decision before replicas
+## Runtime adapters
 
-## Reason
+Both adapters delegate to the same provider-neutral router:
 
-The OAuth authorization-code replay protection currently uses a process-local replay store. A stateless serverless deployment can route exchanges to different workers and cannot guarantee global one-time-code consumption without shared state.
-
-## Implemented adapter
-
-`src/http/node-server.ts` provides the initial Node.js runtime adapter.
-
-Flow:
-
-```
-HTTP request
-   -> Node HTTP adapter
-   -> Fetch Request
-   -> handleRemoteHttpRequest()
-   -> Response
+```text
+Vercel Request -> api/index.ts -> src/http/vercel.ts ----+
+                                                         +-> handleRemoteHttpRequest()
+node:http ------> src/http/node-server.ts ---------------+
 ```
 
-The core router remains platform-neutral.
+`vercel.json` rewrites OAuth discovery, OAuth endpoints, `/mcp`, and `/health` to
+the single Vercel Function.
 
-## Vercel / serverless assessment
+## Distributed replay protection
 
-Not selected for the first runtime.
+Production selects `MCP_OAUTH_REPLAY_STORE=upstash`. Authorization-code consumption
+uses one atomic Redis `SET NX` operation with the signed authorization-code expiry.
+Only a SHA-256 digest of the code is present in the Redis key.
 
-Before multi-instance/serverless deployment:
+The supported credential pairs are:
 
-- implement shared OAuthReplayStore
-- select Redis/KV/database or external authorization service
-- validate distributed replay behavior
-- provision deployment secrets
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`
+- Vercel Marketplace aliases `KV_REST_API_URL` and `KV_REST_API_TOKEN`
+
+Production fails closed when the store is not explicitly selected, when memory is
+selected, or when Redis is unavailable.
 
 ## Current support
 
-- local development: supported
+- local development: supported with memory replay store
 - single Node runtime: supported
-- multi-instance/serverless: deferred
+- Vercel Functions: adapter and shared-store implementation complete; provisioning pending
+- multi-instance OAuth replay semantics: supported with Upstash Redis
+- checkpoint baselines and write audit history: still process-local

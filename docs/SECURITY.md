@@ -54,14 +54,21 @@ Current non-capabilities by design:
 - create or delete fields
 - change repository Issues/PRs
 
-## Future remote deployment
+## Remote deployment
 
-Before exposing this server as a remote MCP endpoint, add:
+The remote endpoint includes OAuth discovery, PKCE authorization, request-scoped bearer
+authorization, and defense-in-depth mutation gates. Vercel production deployments must
+configure `MCP_OAUTH_REPLAY_STORE=upstash`; the runtime rejects the process-local memory
+store in production. Authorization codes are SHA-256 hashed before the atomic Redis replay
+claim is written, and Redis failures prevent token issuance.
 
-- OAuth or another per-user authorization layer
-- protected-resource metadata
-- request-level identity / authorization
-- mutation audit logging
+Before public production use, also complete:
+
+- Vercel project and Upstash Marketplace provisioning
+- deployment secrets and explicit environment separation
+- live OAuth connector validation
 - rate limiting
-- explicit environment separation between development and production
 - secret rotation procedure
+
+Mutation audit records and Project checkpoint baselines remain process-local. Do not treat
+them as durable compliance logs or durable job state in a serverless deployment.

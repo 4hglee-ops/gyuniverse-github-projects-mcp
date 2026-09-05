@@ -22,10 +22,8 @@ import {
   verifyEnvelope,
 } from "./stateless.js";
 
-import {
-  MemoryOAuthReplayStore,
-  OAuthReplayStore,
-} from "./replay-store.js";
+import { createOAuthReplayStore } from "./replay-store-factory.js";
+import { OAuthReplayStore } from "./replay-store.js";
 
 interface RegistrationRequest {
   client_name?: string;
@@ -47,7 +45,7 @@ interface AuthorizationParams {
 }
 
 export const authorizationCodeReplayStore: OAuthReplayStore =
-  new MemoryOAuthReplayStore();
+  createOAuthReplayStore();
 
 export function protectedResourceMetadata(): Record<string, unknown> {
   return {

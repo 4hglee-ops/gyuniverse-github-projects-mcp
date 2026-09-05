@@ -85,11 +85,15 @@ src/workflow/
 ```text
 src/http/
 ├── router.ts                 # platform-neutral Request -> Response routing
-└── remote-mcp.ts             # bearer validation + request-scoped MCP handler
+├── remote-mcp.ts             # bearer validation + request-scoped MCP handler
+├── node-server.ts            # long-lived node:http adapter
+└── vercel.ts                 # Vercel Web Fetch handler
 
 src/oauth/
 ├── stateless.ts              # signed client/code/token envelopes + scope policy
-└── endpoints.ts              # discovery, DCR, approval, PKCE token exchange
+├── endpoints.ts              # discovery, DCR, approval, PKCE token exchange
+├── replay-store.ts           # memory and Redis replay implementations
+└── replay-store-factory.ts   # explicit runtime store selection
 ```
 
 Current public route contract:
@@ -105,11 +109,10 @@ Current public route contract:
 /health
 ```
 
-`router.ts` is intentionally hosting-provider neutral. `node-server.ts` is the long-lived
-Node adapter: it translates `node:http` requests into the standard Fetch Request/Response
-contract and does not duplicate authorization logic. The current process-local replay
-store makes a single long-lived Node instance the supported runtime topology until a shared
-replay store is introduced.
+`router.ts` is intentionally hosting-provider neutral. `node-server.ts` translates
+`node:http` requests into the standard Fetch Request/Response contract. `vercel.ts`
+exports the same router through Vercel's Web Fetch handler. Neither adapter duplicates
+authorization logic.
 
 ## OAuth credential model
 
@@ -217,7 +220,8 @@ verified success + audit record
 
 Authorization codes are signed and expire quickly, but signature + expiry alone do not make a bearer authorization code one-time-use.
 
-M3 therefore includes a consumed-code replay store. Its current implementation is process-local:
+M3 includes a consumed-code replay-store contract with local memory and shared Redis
+implementations:
 
 ```text
 authorization code exchange
@@ -226,7 +230,7 @@ authorization code exchange
 verify signature / client / redirect / resource / PKCE
         |
         v
-consume code in in-memory replay store
+atomically consume code (`SET NX EXAT` in production Redis)
         |
         +-- already consumed --> invalid_grant
         |
@@ -234,11 +238,11 @@ consume code in in-memory replay store
 issue tokens
 ```
 
-This gives correct one-time semantics only within the same process lifetime.
-
-It is **not** a distributed replay guarantee across independent serverless instances or horizontally scaled workers. Production topology must account for this explicitly rather than assuming stateless signed codes solve replay globally.
-
-A shared replay/grant store would solve the distributed case but introduces a persistent external dependency. An external authorization provider is another valid architecture, but also changes the authentication boundary. Neither is introduced implicitly by the M3 core.
+The memory implementation is limited to one process and is intended for local development.
+The Upstash implementation hashes the authorization code before using it as a key and
+uses atomic Redis `SET NX` with the signed code expiry, providing shared one-time semantics
+across Vercel Function instances. Production rejects the memory implementation and does
+not silently fall back when Redis is unavailable.
 
 ## Process-local operational state
 
@@ -302,7 +306,7 @@ Lower-level compatibility tools:
 
 - normalized snapshot-wide analysis is still bounded by the first 100 returned Project items; the pagination-aware single-item resolver is exhaustive within configured page limits
 - real write integration tests require an intentionally write-capable GitHub credential, explicit Project allowlist, and write gate; CI remains secret-free and does not run write smoke tests
-- the remote OAuth/MCP core is not yet attached to a selected production runtime
+- the Vercel runtime adapter exists, but the Vercel project and Upstash resource are not yet provisioned
 - live ChatGPT/Claude connection tests require a reachable deployed HTTPS endpoint and deployment secrets
-- multi-instance/serverless OAuth code replay semantics require either a topology constraint or shared state/auth service
-- Draft PR → Ready for review, merge, release, actual deployment, credential provisioning, shared storage, and external auth-provider adoption remain human-governance / architecture boundaries
+- checkpoint and write-audit state remain process-local even though OAuth replay state is shared
+- Draft PR → Ready for review, merge, release, actual deployment, credential provisioning, and external auth-provider adoption remain human-governance / architecture boundaries

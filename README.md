@@ -17,7 +17,7 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 - OAuth `projects:read` / `projects:write` separation
 - GitHub credential remains server-side only
 - Remote writes require OAuth write scope **and** the existing server-side write gates
-- Long-lived Node HTTP adapter implemented; production host/deployment pending
+- Node and Vercel HTTP adapters implemented; production deployment pending
 - No delete tools
 
 ## MCP tools
@@ -143,8 +143,9 @@ Use `pnpm mcp:stdio` during development when you want to run directly from TypeS
 
 ## Remote MCP core
 
-M3 adds a platform-neutral Fetch `Request -> Response` router in `src/http/router.ts`
-and a long-lived Node HTTP adapter in `src/http/node-server.ts`.
+M3 adds a platform-neutral Fetch `Request -> Response` router in `src/http/router.ts`,
+a long-lived Node HTTP adapter in `src/http/node-server.ts`, and a Vercel Fetch adapter
+in `src/http/vercel.ts` exposed through `api/index.ts`.
 
 Current routes:
 
@@ -160,8 +161,9 @@ Current routes:
 | `/health` | Minimal health response |
 
 The Node adapter translates `node:http` requests into Fetch requests and streams Fetch
-responses back to the client. It is intended for a single long-lived process because the
-current authorization-code replay store is process-local.
+responses back to the client. Local development uses the process-local memory replay
+store by default. Serverless and horizontally scaled production deployments use the
+Upstash Redis adapter for global one-time authorization-code consumption.
 
 Run the TypeScript entrypoint during development:
 
@@ -190,9 +192,15 @@ PUBLIC_BASE_URL=https://projects-mcp.example.com
 MCP_OAUTH_TEAM_CODE=...
 MCP_OAUTH_SIGNING_SECRET=...
 MCP_OAUTH_WRITE_ENABLED=false
+MCP_OAUTH_REPLAY_STORE=upstash
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
 ```
 
-Real values belong in the deployment secret store and must not be committed.
+Vercel Marketplace integrations that inject `KV_REST_API_URL` and
+`KV_REST_API_TOKEN` are also supported. Production refuses an implicit memory-store
+fallback and fails closed if the selected Upstash store is unavailable. Real values
+belong in the deployment secret store and must not be committed.
 
 ### OAuth scopes
 
@@ -264,19 +272,17 @@ Supported redirect URI families are deliberately allowlisted for ChatGPT, Claude
 
 Authorization codes expire after two minutes. Access tokens expire after one hour. Refresh tokens expire after 30 days.
 
-### Current replay-protection limitation
+### Replay protection
 
-Authorization-code replay prevention currently uses a bounded **process-local consumed-code store** in the OAuth endpoint layer.
+Authorization-code replay prevention is selected by `MCP_OAUTH_REPLAY_STORE`:
 
-That is sufficient for a single long-lived process, but it must **not** be assumed to provide global one-time-code semantics across multiple independent serverless instances or horizontally scaled workers.
+- `memory`: local development and single-process testing only
+- `upstash`: production shared state using atomic Redis `SET NX` with code expiry
 
-Therefore production deployment topology is intentionally not hidden behind the current implementation. Before multi-instance/serverless production deployment, choose one of:
-
-- a single-instance/affine runtime with explicitly accepted availability/scaling limits
-- a shared replay/grant store
-- an external standards-compliant authorization service
-
-Introducing shared storage or another auth provider is a separate architecture/integration decision.
+Redis keys contain SHA-256 authorization-code digests rather than bearer code values.
+Vercel and `NODE_ENV=production` runtimes require an explicit store selection and reject
+the memory adapter. Checkpoint baselines and write audit history remain process-local and
+retain their documented restart/lifetime limitations.
 
 ## Read-only integration smoke test
 
@@ -449,7 +455,7 @@ src/
 - [x] safer high-level Status / Priority mutation tools
 - [x] bounded process-local write audit log
 
-### M3 — remote MCP ◐ Node runtime implemented / production deployment pending
+### M3 — remote MCP ◐ Vercel runtime implemented / production deployment pending
 
 - [x] platform-neutral HTTP MCP request handler
 - [x] OAuth protected-resource metadata
@@ -461,6 +467,10 @@ src/
 - [x] secret-free OAuth/HTTP regression tests
 - [x] single-instance long-lived Node runtime selected
 - [x] Node HTTP deployment adapter
+- [x] Vercel Fetch deployment adapter and route rewrites
+- [x] Upstash Redis shared OAuth replay store
+- [x] fail-closed production store selection
+- [ ] Vercel project and Upstash Marketplace provisioning
 - [ ] production secret configuration
 - [ ] live ChatGPT connection smoke test
 - [ ] live Claude connection smoke test
@@ -477,7 +487,9 @@ Never commit GitHub tokens, OAuth signing secrets, team codes, or `.env` files.
 
 The client-facing MCP OAuth token and the server-side GitHub credential are separate credentials with separate purposes. OAuth access must never expose or substitute for the GitHub token.
 
-Checkpoint data, write audit records, and the current authorization-code replay cache are process-local. Their lifetime and correctness characteristics must be considered when selecting a production deployment topology.
+Checkpoint data and write audit records remain process-local. OAuth authorization-code
+replay state is process-local only in development and uses the configured shared Upstash
+store in production.
 
 ## License
 
