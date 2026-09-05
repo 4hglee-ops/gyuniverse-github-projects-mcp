@@ -1,18 +1,20 @@
 # gyuniverse-github-projects-mcp
 
-Focused MCP server for GitHub Projects v2 team workflows.
+Focused MCP server for safe GitHub Projects v2 team workflows.
 
-This repository is intentionally narrower than a general GitHub MCP server. It focuses on Projects metadata, fields, items, normalized team-state snapshots, workflow reconciliation, checkpoint/delta analysis, and carefully gated project mutations.
+This repository is intentionally narrower than a general GitHub MCP server. It focuses on Projects metadata, fields, items, normalized team-state snapshots, workflow reconciliation, checkpoint/delta analysis, guarded workflow mutations, and write auditing.
 
 ## Status
 
-**v0.2 / M2 in progress**
+**v0.2 / M2 implementation complete on Draft PR**
 
 - M1 local Projects MCP complete
 - Issue / Pull Request URL and Project-item resolution
 - Missing Status / assignee state-gap analysis
 - Pull Request merge ↔ Project Status reconciliation
 - Process-local Project state checkpoint / delta comparison
+- High-level guarded Status / Priority mutation tools
+- Process-local bounded write audit log
 - Owner / Project allowlists
 - Write tools disabled by default
 - No delete tools
@@ -20,7 +22,7 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 
 ## MCP tools
 
-### GitHub read-only
+### GitHub read / analysis
 
 | Tool | Purpose |
 | --- | --- |
@@ -33,8 +35,9 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 | `get_github_project_snapshot` | Normalize project state for AI analysis |
 | `analyze_github_project_state_gaps` | Detect missing Status and missing assignee state gaps |
 | `analyze_github_project_reconciliation` | Detect PR merge ↔ Project Status mismatches |
-| `compare_github_project_state_checkpoint` | Compare current Project state with the latest process-local checkpoint without replacing it |
+| `compare_github_project_state_checkpoint` | Compare current Project state with the latest process-local checkpoint |
 | `get_github_project_brief_context` | Return snapshot + team-brief interpretation contract |
+| `list_github_project_write_audit_log` | Read recent bounded process-local write audit metadata |
 
 ### Local checkpoint state
 
@@ -46,16 +49,37 @@ Creating a checkpoint **does not write to GitHub**. It updates only MCP process 
 
 A comparison can report Status, Priority, assignee, repository state, merge state, archive state, custom field, metadata, and snapshot-membership changes. Comparison does not silently replace the baseline; create a new checkpoint explicitly when the current state should become the new baseline.
 
-Current normalized snapshots request at most 100 items. When a snapshot returns exactly the requested limit, the checkpoint marks coverage as potentially incomplete. Attribute changes for matching Project item IDs remain useful, but entered/left snapshot membership is reported as an observation rather than authoritative proof that an item was added to or removed from the Project. This avoids overstating results until snapshot pagination is implemented.
+Current normalized snapshots request at most 100 items. When a snapshot reaches that requested limit, entered/left membership changes are treated as snapshot-window observations rather than authoritative proof of Project add/remove events.
 
 ### GitHub write — disabled by default
+
+Preferred high-level workflow tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `update_github_project_item_status` | Set one Project item's exact Status option by name with Project-membership and post-write verification |
+| `update_github_project_item_priority` | Set one Project item's exact Priority option by name with Project-membership and post-write verification |
+
+Lower-level compatibility tools:
 
 | Tool | Purpose |
 | --- | --- |
 | `add_github_project_item` | Add an existing Issue/PR node to a Project |
-| `update_github_project_item_field` | Update text/number/date/single-select/multi-select/iteration fields |
+| `update_github_project_item_field` | Update text/number/date/single-select/multi-select/iteration fields by node IDs |
 
 There are intentionally **no delete tools**.
+
+The high-level Status/Priority tools should be preferred for AI workflows because they do not require the model to provide raw field and option IDs. They:
+
+1. resolve the allowed Project from owner + Project number
+2. require the existing write gate and explicit Project allowlist
+3. resolve the exact `Status`/`Priority` single-select field and exact option name
+4. query `ProjectV2Item.project` and reject a mismatched item before mutation
+5. skip the mutation if the requested value is already set
+6. perform one field mutation when needed
+7. re-read the item and field after mutation
+8. fail if the post-write value does not match
+9. append a structured write-audit record
 
 ## Why a dedicated Projects MCP?
 
@@ -119,31 +143,26 @@ Use `pnpm mcp:stdio` during development when you want to run directly from TypeS
 
 ## Read-only integration smoke test
 
-After configuring a read-only token in `.env`, list the accessible Projects for an allowed owner:
+After configuring a read-only token in `.env`:
 
 ```bash
 pnpm smoke:read -- gyuniverse-hq
+pnpm smoke:read -- gyuniverse-hq 2
 ```
 
-To validate the complete read path for one Project number:
+The Project-specific command reads metadata, fields, items, and a normalized snapshot. It never invokes a mutation regardless of the write setting.
 
-```bash
-pnpm smoke:read -- gyuniverse-hq 3
-```
-
-The second command reads project metadata, fields, items, and a normalized snapshot. It never invokes a mutation, regardless of the write setting.
-
-The read path was integration-tested against `gyuniverse-hq` Project #2 on 2026-09-05. Project listing, metadata, fields, items, and snapshot normalization all completed successfully with a fine-grained read-only token.
+The read path was integration-tested against `gyuniverse-hq` Project #2 on 2026-09-05 with a fine-grained read-only token.
 
 ## Checkpoint / delta workflow
 
-With the MCP running, create a baseline:
+Create a baseline:
 
 ```text
 Create a state checkpoint for Project #2 under gyuniverse-hq.
 ```
 
-After Project state changes, compare against that same baseline:
+Later:
 
 ```text
 Compare Project #2 with its latest checkpoint and show only what changed.
@@ -162,37 +181,63 @@ Useful delta categories include:
 - `item_entered_snapshot`
 - `item_left_snapshot`
 
-Checkpoint storage is intentionally process-local in the current M2 implementation. Persistent checkpoint storage would introduce a new storage/backend concern and is deferred until a later milestone explicitly requires it.
+Checkpoint storage is intentionally process-local. Persistent storage is a separate architecture decision.
 
-## Gated write integration smoke test
+## Guarded write workflow
 
-Use the single-select smoke command only for a non-critical item after all three write boundaries are deliberately configured: the token has Projects write permission, the target Project node ID is explicitly allowlisted, and `GITHUB_PROJECTS_WRITE_ENABLED=true`.
+Write operations require all of the following:
+
+1. the token has the minimum required Projects write permission
+2. the target Project node ID is explicitly present in `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
+3. `GITHUB_PROJECTS_WRITE_ENABLED=true`
+
+Example high-level request:
+
+```text
+Set Project #2 item PVTI_... Status to Done.
+```
+
+The Status/Priority path performs Project membership validation and a post-mutation read-back verification before reporting success.
+
+### Low-level single-select smoke test
+
+The existing manual smoke script remains available for a deliberately selected non-critical item:
 
 ```bash
 pnpm smoke:update-single-select -- <project-id> <item-id> <field-id> <option-id>
 ```
 
-The command accepts only a single-select option update and calls the same guarded mutation path used by the MCP server. Restore `GITHUB_PROJECTS_WRITE_ENABLED=false` immediately after the test and reduce the token back to read-only when no further mutation work is planned.
+Use the minimum mutation count necessary to prove behavior, then restore `GITHUB_PROJECTS_WRITE_ENABLED=false` and reduce the token back to read-only when no further write verification is planned.
 
-The write path was integration-tested against a non-critical item in `gyuniverse-hq` Project #2 on 2026-09-05. A Status option update succeeded, and a subsequent read-only snapshot independently confirmed the new value.
+The M1 write path was integration-tested against a non-critical item in `gyuniverse-hq` Project #2 on 2026-09-05. The new M2 high-level Status/Priority path is covered by secret-free contract/unit tests and CI; a new real mutation is not performed automatically merely because the earlier smoke test succeeded.
+
+## Write audit log
+
+`list_github_project_write_audit_log` exposes the newest process-local write records.
+
+Current properties:
+
+- bounded to the most recent 200 entries
+- newest-first reads, maximum 200 entries
+- optional Project/item filtering
+- records operation, target, outcome and verification state
+- high-level Status/Priority writes record requested/before/after option names
+- lower-level writes are recorded without arbitrary raw field payloads
+- tokens, Authorization headers and raw secret values are never stored
+- error records use compact error codes instead of full error response bodies
+- process-local only; entries disappear on restart
+
+This is an operational audit aid, not durable compliance logging.
 
 ## Safety model
 
 ### Owner allowlist
 
-`GITHUB_PROJECTS_ALLOWED_OWNERS`
-
-Limits the users/organizations whose Projects the MCP can read.
+`GITHUB_PROJECTS_ALLOWED_OWNERS` limits users/organizations whose Projects the MCP can read.
 
 ### Project allowlist
 
-`GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
-
-For **read operations**, this is optional. When empty, all Projects under an allowed owner may be read. When populated, only the listed ProjectV2 node IDs are exposed.
-
-For **write operations**, this is mandatory. Mutation tools fail closed unless at least one explicit ProjectV2 node ID is configured, and the target Project node ID must be present in that allowlist.
-
-Checkpoint creation and comparison use the same read-side owner/Project validation before capturing current state.
+`GITHUB_PROJECTS_ALLOWED_PROJECT_IDS` is optional for reads. For writes it is mandatory and fail-closed.
 
 ### Write gate
 
@@ -200,14 +245,11 @@ Checkpoint creation and comparison use the same read-side owner/Project validati
 GITHUB_PROJECTS_WRITE_ENABLED=false
 ```
 
-GitHub mutation tools fail closed unless this is explicitly changed to `true`.
+GitHub mutation tools fail closed unless deliberately changed to `true`.
 
-A GitHub write therefore requires **both**:
+A GitHub write therefore requires both the explicit write gate and an explicit Project allowlist match.
 
-1. `GITHUB_PROJECTS_WRITE_ENABLED=true`
-2. the target Project node ID in `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
-
-The checkpoint tools do not use or bypass the GitHub write gate because they never mutate GitHub state.
+Checkpoint tools and write-audit reads do not bypass or activate GitHub writes.
 
 ## CI validation
 
@@ -220,34 +262,7 @@ pnpm build
 pnpm test
 ```
 
-CI installs pnpm before enabling the `setup-node` pnpm cache so the cache resolver can find the executable.
-
-## Example prompts
-
-Once connected to an MCP client:
-
-```text
-List the GitHub Projects available under gyuniverse-hq.
-```
-
-```text
-Show Project #3's fields and explain the Status / Priority / Iteration options.
-```
-
-```text
-Create a current-state brief for Project #3. Separate In Progress, Assigned Work,
-Unassigned Work, Done, and State Gaps. Do not treat an open PR as completed work.
-```
-
-```text
-Create a checkpoint for Project #2, then later compare the current state with that checkpoint.
-```
-
-Later, with write mode deliberately enabled:
-
-```text
-Move this project item to the selected Status option.
-```
+CI remains secret-free; write smoke tests do not run automatically.
 
 ## Current architecture
 
@@ -264,10 +279,13 @@ src/
 ├── workflow/
 │   ├── checkpoint.ts
 │   ├── reconciliation.ts
-│   └── state-gaps.ts
+│   ├── single-select-update.ts
+│   ├── state-gaps.ts
+│   └── write-audit.ts
 └── mcp/
     ├── build-server.ts
     ├── checkpoint-tools.ts
+    ├── workflow-write-tools.ts
     └── stdio.ts
 ```
 
@@ -276,36 +294,28 @@ src/
 ### M1 — local Projects MCP ✅
 
 - [x] GraphQL client
-- [x] Project metadata
-- [x] Project fields/options
-- [x] Project items
-- [x] multi-select field support
-- [x] normalized project snapshot
-- [x] team brief context contract
-- [x] gated add-item mutation
-- [x] gated field update mutation
-- [x] regression tests
-- [x] reproducible lockfile
-- [x] build/start scripts
-- [x] CI validation pipeline
-- [x] local integration test against a real Project
+- [x] Project metadata / fields / items
+- [x] normalized project snapshot and team brief context
+- [x] gated add-item / field-update mutations
+- [x] regression tests, build/start scripts and CI
+- [x] real read integration test
 - [x] gated write integration test against a non-critical item
 
 ### M1.1 — scale backlog
 
 - [ ] pagination beyond first 100 normalized snapshot items
 
-This is not a v0.1 release blocker for the current Gyuniverse Project size; it should be implemented before treating snapshot-wide membership analysis as exhaustive for Projects that can exceed the first 100 returned items.
+This should be implemented before treating snapshot-wide membership analysis as exhaustive for Projects that can exceed the first 100 returned items.
 
-### M2 — workflow intelligence
+### M2 — workflow intelligence ✅ implementation complete
 
 - [x] Issue / PR URL → node ID resolver
 - [x] Issue / PR URL → Project item resolver with cursor pagination
 - [x] missing assignee / missing status detection
 - [x] PR merge ↔ Project status reconciliation
 - [x] project state checkpoint / delta
-- [ ] safer high-level Status / Priority mutation tools
-- [ ] write audit log
+- [x] safer high-level Status / Priority mutation tools
+- [x] bounded process-local write audit log
 
 ### M3 — remote MCP
 
@@ -325,7 +335,7 @@ This is not a v0.1 release blocker for the current Gyuniverse Project size; it s
 
 Never commit GitHub tokens or `.env` files. Keep write permissions disabled except during a concrete, allowlisted mutation workflow against an intended Project item.
 
-Checkpoint data can contain Project titles, repository names, assignees, field values, and URLs. In the current implementation it remains in the MCP server process only and is not written to a new external storage system.
+Checkpoint data and write audit records remain process-local in M2. Introducing persistent storage, OAuth, GitHub App migration, remote deployment, Jira, Discord, or Notion integration is a separate architecture/integration boundary.
 
 ## License
 
