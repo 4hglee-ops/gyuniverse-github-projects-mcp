@@ -22,6 +22,7 @@ import {
   parseGitHubIssueOrPullRequestUrl,
   resolveGitHubIssueOrPullRequest,
 } from "../github/references.js";
+import { analyzeProjectReconciliation } from "../workflow/reconciliation.js";
 import { analyzeProjectStateGaps } from "../workflow/state-gaps.js";
 
 export interface BuildServerOptions {
@@ -219,6 +220,50 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
           returnedItems: snapshot.itemCount ?? 0,
           completeBeyondFirstPage: false,
           note: "State-gap analysis currently uses the normalized snapshot path, which is bounded by the requested first value (max 100). Use the pagination-aware Project item resolver for exhaustive single-item lookup.",
+        },
+      });
+    },
+  );
+
+  server.registerTool(
+    "analyze_github_project_reconciliation",
+    {
+      description: "Compare Pull Request merge state with Project Status and surface evidence-backed workflow mismatches.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        number: z.number().int().min(1),
+        first: z.number().int().min(1).max(100).default(100),
+        statusFieldName: z.string().min(1).default("Status"),
+        completedStatusNames: z.array(z.string().min(1)).max(20).default(["Done", "Completed", "Closed"]),
+        includeArchived: z.boolean().default(false),
+        reportDoneButNotMerged: z.boolean().default(true),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({
+      owner,
+      number,
+      first,
+      statusFieldName,
+      completedStatusNames,
+      includeArchived,
+      reportDoneButNotMerged,
+    }) => {
+      await resolveProject(owner, number);
+      const snapshot = await getProjectSnapshot(client, owner, number, first) as Parameters<typeof analyzeProjectReconciliation>[0];
+      const analysis = analyzeProjectReconciliation(snapshot, {
+        statusFieldName,
+        completedStatusNames,
+        includeArchived,
+        reportDoneButNotMerged,
+      });
+      return json({
+        ...analysis,
+        coverage: {
+          requestedItems: first,
+          returnedItems: snapshot.itemCount ?? 0,
+          completeBeyondFirstPage: false,
+          note: "Reconciliation currently uses the normalized snapshot path, which is bounded by the requested first value (max 100).",
         },
       });
     },
