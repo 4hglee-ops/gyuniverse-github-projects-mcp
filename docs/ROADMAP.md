@@ -6,7 +6,7 @@
 | M2 Workflow Intelligence | Complete | Resolver / Gap / Reconciliation / Checkpoint / Audit |
 | M3 Remote MCP + OAuth | Complete | HTTP / OAuth / PKCE / Vercel / Upstash |
 | M3 ChatGPT Live Read | Complete | Connector OAuth + real Project read |
-| M4 Project Operating Foundation | In progress | Priority / Iteration / Views / Native automation |
+| M4 Project Operating Foundation | In progress | Priority / Views / Native automation / no-sprint continuous flow |
 | M5 Shared Core | Planned | Separate transport from business logic |
 | M6 High-level Read | Planned | Brief / My Work / Backlog / Review / Blockers |
 | M7 Identity Foundation | Planned | Individual identity + permission model |
@@ -17,8 +17,9 @@
 ## M4
 - [x] Inspect Project #2 and preserve Priority P0 / P1 / P2 / P3
 - [x] Add safe inspection, dry-run, API apply, and verification code
-- [ ] Select Iteration cadence and first start date, then apply
-- [ ] Create/verify Backlog / Current Sprint / My Work / Review Queue / Workstream views
+- [x] Decide **not to use Sprint / Iteration** for the initial operating model
+- [ ] Update M4 apply so Iteration is optional and disabled by default
+- [ ] Create/verify Backlog / Active Work / My Work / Review Queue / Workstream views
 - [ ] Enable/verify Issue closed -> Done and PR merged -> Done
 - [ ] Configure Issue/PR auto-add for the three source repositories
 - [ ] Install PR ready for review -> In Review in the three source repositories
@@ -55,7 +56,8 @@ High-level writes:
 - startWork
 - updateWorkItemStatus
 - updateWorkItemPriority
-- updateWorkItemIteration
+
+Iteration-specific write is not part of the initial Project #2 operating model.
 
 ## M9
 Add a semantic REST/GPT Actions adapter that uses the same Shared Core as MCP.
@@ -65,7 +67,7 @@ Add a semantic REST/GPT Actions adapter that uses the same Shared Core as MCP.
 - Durable audit
 - Sub-issues
 - Dependencies
-- Sprint planning
+- Optional future sprint planning
 - Bulk Preview -> Approval -> Apply
 - richer ACL
 

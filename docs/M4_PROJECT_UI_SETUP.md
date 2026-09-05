@@ -3,6 +3,9 @@
 Use this checklist only for settings that GitHub does not expose safely through the
 supported APIs or when the inspection reports an incompatible existing view.
 
+Project #2 uses a **no-sprint continuous-flow model**. Do not create or require an
+Iteration field for the initial operating setup.
+
 ## 1. Views
 
 Run `pnpm project:foundation:inspect` first. Create a view manually only when it is
@@ -15,18 +18,18 @@ filter/group and field menus.
    - Filter: `status:Backlog`
    - Grouping: None
    - Visible fields: Title, Priority, Repository, Assignees
-   - Purpose: triage work that has not entered a sprint
-2. **🏃 Current Sprint**
+   - Purpose: triage work that has not started yet
+2. **🏃 Active Work**
    - Layout: Board
-   - Filter: `iteration:@current`
+   - Filter: Status is Todo, In Progress, or In Review
    - Columns/grouping: Status
-   - Visible fields: Title, Priority, Repository, Assignees, Status, Iteration
-   - Purpose: run the current sprint using the standard Status columns
+   - Visible fields: Title, Priority, Repository, Assignees, Status
+   - Purpose: run active work continuously without a Sprint boundary
 3. **👤 My Work**
    - Layout: Table
    - Filter: `assignee:@me`
    - Grouping: None
-   - Visible fields: Title, Status, Priority, Repository, Iteration, Assignees
+   - Visible fields: Title, Status, Priority, Repository, Assignees
    - Purpose: show work assigned to the current viewer
 4. **🔍 Review Queue**
    - Layout: Table
@@ -38,7 +41,7 @@ filter/group and field menus.
    - Layout: Table
    - Filter: None
    - Grouping: Repository
-   - Visible fields: Title, Repository, Status, Priority, Assignees, Iteration
+   - Visible fields: Title, Repository, Status, Priority, Assignees
    - Purpose: separate frontend, backend, and LLM/RAG workstreams
 
 Save each change, reopen the view, and compare it with the inspection plan. Do not
@@ -98,6 +101,7 @@ After configuration, verify with one non-critical test PR:
 - Merging it results in `Done`.
 - Closing a test Issue results in `Done`.
 - Priority remains unchanged throughout.
+- No Iteration field is required for the workflow.
 
 Record the repository, item URL, before/after Status, and verification time. Then
 disable any temporary write credential or test-only workflow.
