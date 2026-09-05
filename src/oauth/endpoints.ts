@@ -22,6 +22,11 @@ import {
   verifyEnvelope,
 } from "./stateless.js";
 
+import {
+  MemoryOAuthReplayStore,
+  OAuthReplayStore,
+} from "./replay-store.js";
+
 interface RegistrationRequest {
   client_name?: string;
   redirect_uris?: string[];
@@ -41,21 +46,8 @@ interface AuthorizationParams {
   scope: string;
 }
 
-export class AuthorizationCodeReplayStore {
-  private readonly consumed = new Map<string, number>();
-
-  consume(code: string, expiresAt: number): boolean {
-    const now = nowSeconds();
-    for (const [stored, exp] of this.consumed) {
-      if (exp <= now) this.consumed.delete(stored);
-    }
-    if (this.consumed.has(code)) return false;
-    this.consumed.set(code, expiresAt);
-    return true;
-  }
-}
-
-export const authorizationCodeReplayStore = new AuthorizationCodeReplayStore();
+export const authorizationCodeReplayStore: OAuthReplayStore =
+  new MemoryOAuthReplayStore();
 
 export function protectedResourceMetadata(): Record<string, unknown> {
   return {
