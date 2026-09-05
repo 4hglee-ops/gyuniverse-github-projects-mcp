@@ -118,7 +118,7 @@ pnpm project:foundation:configure
 The M4 configure command uses the no-sprint model by default. It creates or verifies
 views without creating Iteration and requires no sprint parameters.
 
-An apply still requires the existing write controls:
+An apply requires the existing write controls:
 
 ```dotenv
 GITHUB_PROJECTS_ALLOWED_OWNERS=gyuniverse-hq
@@ -126,8 +126,68 @@ GITHUB_PROJECTS_ALLOWED_PROJECT_IDS=PVT_kwDOEzfCi84BidwG
 GITHUB_PROJECTS_WRITE_ENABLED=true
 ```
 
-After apply, restore `GITHUB_PROJECTS_WRITE_ENABLED=false` and reduce the credential
-to read-only if no more setup changes are planned.
+These gates are part of the operator security boundary and are not a replacement for
+per-user authorization.
+
+## Write-capable operator posture after M4
+
+The MCP is intended to become a **multi-user AI Project Operator**, not a permanently
+read-only Project viewer. The server-side GitHub credential may therefore retain the
+minimum Organization Projects **write** permission needed by the supported operator
+mutations.
+
+A write-capable server credential does **not** mean every connected user is entitled
+to write. The long-term access decision belongs to the application identity and
+permission layers:
+
+```text
+Authentication
+  -> User Identity
+  -> Project Membership
+  -> Role / Permission
+  -> Operation Policy
+  -> Write Guard
+  -> GitHub mutation
+```
+
+Target roles include:
+
+- **Admin / PM** — broad Project read/write within policy.
+- **Member** — selected writes such as status, priority, or self-assignment according to policy.
+- **Viewer** — read-only.
+
+Multiple users may therefore become authorized write users. Write access is not tied
+to one named operator or to the MCP server credential itself.
+
+### Current pre-Identity/ACL stage
+
+Individual Identity / ACL is not complete in M4. Until that layer is implemented,
+write-capable MCP use is a **controlled development/operator mode** for a limited set
+of trusted users rather than the final multi-user authorization model.
+
+Keep the existing defense-in-depth controls active:
+
+- OAuth `projects:read` / `projects:write` scope separation.
+- explicit owner and Project node-ID allowlists.
+- `GITHUB_PROJECTS_WRITE_ENABLED` write gate.
+- operation-specific validation and membership checks.
+- post-mutation re-read verification.
+- structured write audit metadata.
+- destructive operations excluded from the initial operator surface.
+
+Before write access is opened broadly to the team or external users, Individual
+Identity + ACL must become the authoritative permission layer.
+
+### Repository automation credential
+
+The canonical repository workflow uses the separate Actions secret
+`PROJECT_AUTOMATION_TOKEN` for `ready_for_review -> In Review`. That workflow performs
+a ProjectV2 Status mutation, so this credential also needs the minimum Projects
+**write** permission while the workflow is enabled.
+
+Keep this automation credential separate from the MCP credential. Its repository
+access should be limited to what the workflow needs, and a dedicated GitHub App can
+replace the PAT later without changing the workflow contract.
 
 ## Desired views
 
@@ -150,9 +210,17 @@ to read-only if no more setup changes are planned.
 - Re-reads created views before reporting success.
 - Performs no deletion, archival, bulk item mutation, or secret output.
 
-## Remaining work
+## M4 closeout
 
-1. Rename Project #2 in GitHub UI to `Bid Change Validator · WBS`.
-2. Synchronize `TARGET_PROJECT.title` in code before the next guarded apply.
-3. Align remaining documentation and workflow display text with the new name.
-4. Restore PAT / Project permissions to the minimum read-only posture after M4 write validation.
+Completed:
+
+- Project renamed to `Bid Change Validator · WBS`.
+- `TARGET_PROJECT.title` synchronized with the live Project.
+- Workflow display text aligned with the new name.
+- No-sprint views and native automation validated.
+- `ready_for_review -> In Review` validated with a temporary Draft PR.
+- write-capable MCP operator direction retained for controlled development.
+- future multi-user write access explicitly assigned to the Identity / ACL roadmap rather than one operator.
+
+M4 does not claim that final per-user authorization is complete. That remains a later
+Identity Foundation milestone before broad multi-user write rollout.
