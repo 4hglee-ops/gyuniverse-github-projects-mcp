@@ -2,16 +2,52 @@
 
 ## Scope
 
-M4 establishes the operating surface for `gyuniverse-hq` Project #2, `LOV WBS`
-(`PVT_kwDOEzfCi84BidwG`). It preserves the existing Priority field and adds only
-missing, explicitly approved structure.
+M4 establishes the operating surface for `gyuniverse-hq` Project #2,
+`Bid Change Validator · WBS` (`PVT_kwDOEzfCi84BidwG`). The Project name was changed
+from the provisional `LOV WBS` label to make the product scope explicit. The Project
+node ID and number remain authoritative.
+
+## Repository strategy
+
+The Project must survive the repository transition without changing its role as the
+single work-management layer.
+
+### Phase 1 — weekend parallel development
+
+Use the three temporary parallel repositories to reduce merge conflicts while each
+workstream moves quickly:
+
+- `gyuniverse-hq/bid-change-validator-frontend`
+- `gyuniverse-hq/bid-change-validator-backend`
+- `gyuniverse-hq/bid-change-validator-llm-rag`
+
+During this phase, `🧩 Workstream` can group by Repository and clearly separate the
+three workstreams.
+
+### Phase 2 — integrated main product
+
+When the integrated product baseline is ready, `gyuniverse-hq/bid-change-validator`
+becomes the canonical repository. Normal work then follows the repository branching
+model:
+
+```text
+main
+└── develop
+    ├── feature/frontend-*
+    ├── feature/backend-*
+    ├── feature/llm-rag-*
+    └── feature/infra-*
+```
+
+`Bid Change Validator · WBS` remains the same Project across both phases. Repository
+splitting is a temporary delivery tactic, not a second project-management system.
+After consolidation, Workstream grouping may move from Repository to an `area:*` or
+component label if repository grouping no longer provides useful separation.
 
 ## Operating model
 
-The team will use **GitHub Projects as the primary development work-management system**
-and will **not use Sprint / Iteration for the initial operating model**.
-
-The Project therefore follows a lightweight continuous-flow / Kanban-style model:
+The team uses **GitHub Projects as the primary development work-management system**
+and does **not use Sprint / Iteration** for the initial operating model.
 
 ```text
 Backlog -> Todo -> In Progress -> In Review -> Done
@@ -38,36 +74,32 @@ The existing field and options are authoritative and must not be recreated:
 - Existing Iteration data, if one appears later, must never be deleted automatically.
 - Sprint support may remain an optional future capability, but it is not the default.
 
-## Current inspection (2026-09-05)
+## Validated automation state (2026-09-05)
 
-| Component | Result |
+The canonical `gyuniverse-hq/bid-change-validator` repository has been used as the
+reference implementation and validation target for the long-term automation pattern.
+
+| Flow | Result |
 | --- | --- |
-| Project identity | Confirmed |
-| Status | Compatible: Backlog, Todo, In Progress, In Review, Done |
-| Priority | Compatible and preserved: P0, P1, P2, P3 |
-| Iteration | Missing; intentionally not required |
-| REST field IDs | Readable |
-| Views | Readable; existing Table, Kanban, and Roadmap views detected |
-| Workflow details | Current fine-grained PAT cannot read workflow nodes |
+| PR auto-add -> Backlog | Validated |
+| PR close / merge -> Done | Validated |
+| Draft -> Ready for review -> In Review | Validated |
+| Priority preservation during transitions | Validated |
+| Iteration required | No |
 
-View planning requires readable views and REST field IDs, which the current token
-provides. Workflow detail inspection is independent and reports its permission
-limitation without hiding readable view state.
+The three temporary parallel repositories may reuse the same pattern during Phase 1
+when needed, but the long-term reference implementation belongs to the canonical
+`bid-change-validator` repository.
 
 ## Supported automation boundary
 
 | Need | Mechanism | Repository behavior |
 | --- | --- | --- |
 | Create missing views | GitHub REST API | Existing compatible views are preserved; conflicts require review |
-| Issue closed -> Done | GitHub Project built-in workflow | Verify in Project UI |
-| PR merged -> Done | GitHub Project built-in workflow | Verify in Project UI |
-| Auto-add Issues/PRs | GitHub Project built-in workflow | Configure in Project UI |
-| PR ready for review -> In Review | Repository GitHub Actions | Install separately in each source repository |
-
-GitHub exposes view creation through its supported API, but built-in workflow rule
-configuration still needs Project UI verification. Repository Actions are kept out
-of this repository because the event occurs in the frontend, backend, and LLM/RAG
-repositories.
+| Issue closed -> Done | GitHub Project built-in workflow | Validated against canonical repo flow |
+| PR merged -> Done | GitHub Project built-in workflow | Validated against canonical repo flow |
+| Auto-add Issues/PRs | GitHub Project built-in workflow | Canonical repo validated; temporary repos may opt in during Phase 1 |
+| PR ready for review -> In Review | Repository GitHub Actions | Canonical repo validated; replicate only where needed |
 
 ## Commands and safety gates
 
@@ -86,7 +118,7 @@ pnpm project:foundation:configure
 The M4 configure command uses the no-sprint model by default. It creates or verifies
 views without creating Iteration and requires no sprint parameters.
 
-An eventual apply still requires the existing write controls:
+An apply still requires the existing write controls:
 
 ```dotenv
 GITHUB_PROJECTS_ALLOWED_OWNERS=gyuniverse-hq
@@ -105,7 +137,7 @@ to read-only if no more setup changes are planned.
 | 🏃 Active Work | Board | `status:Todo,"In Progress","In Review"`; columns by Status | Title, Priority, Repository, Assignees, Status |
 | 👤 My Work | Table | `assignee:@me -status:Done` | Title, Status, Priority, Repository, Assignees |
 | 🔍 Review Queue | Table | Status = In Review | Title, Repository, Linked pull requests, Reviewers, Assignees, Priority |
-| 🧩 Workstream | Table | Group by Repository | Title, Repository, Status, Priority, Assignees |
+| 🧩 Workstream | Table | Phase 1: Repository; Phase 2: evaluate area/component grouping | Title, Repository, Status, Priority, Assignees |
 
 ## Apply guarantees
 
@@ -120,6 +152,7 @@ to read-only if no more setup changes are planned.
 
 ## Remaining work
 
-1. Create/verify the no-sprint views.
-2. Verify built-in workflows and auto-add filters in the Project UI.
-3. Install the ready-for-review Action in each source repository.
+1. Rename Project #2 in GitHub UI to `Bid Change Validator · WBS`.
+2. Synchronize `TARGET_PROJECT.title` in code before the next guarded apply.
+3. Align remaining documentation and workflow display text with the new name.
+4. Restore PAT / Project permissions to the minimum read-only posture after M4 write validation.

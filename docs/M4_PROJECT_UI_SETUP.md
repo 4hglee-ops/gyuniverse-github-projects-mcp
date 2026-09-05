@@ -1,10 +1,11 @@
 # M4 GitHub Project UI Setup
 
 Use this checklist only for settings that GitHub does not expose safely through the
-supported APIs or when the inspection reports an incompatible existing view.
+supported APIs or when inspection reports an incompatible existing view.
 
-Project #2 uses a **no-sprint continuous-flow model**. Do not create or require an
-Iteration field for the initial operating setup.
+Project #2 is named `Bid Change Validator · WBS` and uses a **no-sprint
+continuous-flow model**. Do not create or require an Iteration field for the initial
+operating setup.
 
 ## 1. Views
 
@@ -40,14 +41,39 @@ filter/group and field menus.
 5. **🧩 Workstream**
    - Layout: Table
    - Filter: None
-   - Grouping: Repository
+   - Phase 1 grouping: Repository
+   - Phase 2: evaluate `area:*` / component grouping after consolidation into the canonical repo
    - Visible fields: Title, Repository, Status, Priority, Assignees
-   - Purpose: separate frontend, backend, and LLM/RAG workstreams
+   - Purpose: preserve workstream visibility across repository transition
 
-Save each change, reopen the view, and compare it with the inspection plan. Do not
-delete or replace unrelated existing views.
+Do not delete or replace unrelated existing views.
 
-## 2. Built-in status workflows
+## 2. Repository lifecycle
+
+### Phase 1 — weekend parallel development
+
+Temporary parallel repositories:
+
+- `gyuniverse-hq/bid-change-validator-frontend`
+- `gyuniverse-hq/bid-change-validator-backend`
+- `gyuniverse-hq/bid-change-validator-llm-rag`
+
+These repositories exist to let frontend, backend, and LLM/RAG work proceed in
+parallel with minimal merge friction. They are not separate long-term product
+management surfaces.
+
+### Phase 2 — canonical repository
+
+After the integrated product baseline is established, use:
+
+- `gyuniverse-hq/bid-change-validator`
+- base integration branch: `develop`
+- normal work: feature branches under `develop`
+- stable release flow: `develop -> main`
+
+`Bid Change Validator · WBS` remains the same Project in both phases.
+
+## 3. Built-in status workflows
 
 Open `https://github.com/orgs/gyuniverse-hq/projects/2`, then open the Project menu
 and **Workflows**.
@@ -57,51 +83,61 @@ Enable and verify:
 1. **Item closed**: set `Status` to `Done`.
 2. **Pull request merged**: set `Status` to `Done`.
 
-Do not add a second equivalent rule if one is already enabled.
+These transitions have already been validated against the canonical
+`gyuniverse-hq/bid-change-validator` repository. Do not add a second equivalent rule
+if one is already enabled.
 
-## 3. Auto-add source work
+## 4. Auto-add source work
 
-Configure auto-add filters for these repositories:
+The canonical repository is the long-term automation reference:
 
-- `gyuniverse-hq/bid-change-validator-frontend`
-- `gyuniverse-hq/bid-change-validator-backend`
-- `gyuniverse-hq/bid-change-validator-llm-rag`
+- `gyuniverse-hq/bid-change-validator`
 
-Each filter should include both Issues and Pull Requests unless the team deliberately
-chooses a narrower scope. Preview matching items before saving. GitHub plan limits
-the number of auto-add workflows, so confirm the organization plan before creating
-three rules. If the plan limit is lower, use repository Actions as the fallback.
+Validated canonical flow:
 
-## 4. Ready-for-review transition
+```text
+new PR / item -> Backlog
+Ready for review -> In Review
+close / merge -> Done
+```
 
-The `pull_request.ready_for_review` event belongs in each source repository. Store a
-fine-grained token or GitHub App credential as an organization/repository Actions
-secret named `PROJECT_AUTOMATION_TOKEN`; never place it in YAML or source control.
-Grant only the repository read and organization Projects write permissions needed.
+During Phase 1, the three temporary parallel repositories may opt into the same
+Project auto-add pattern when needed so all active work remains visible in the same
+WBS. Do not document the three temporary repositories as the permanent source of
+truth.
 
-The workflow should:
+## 5. Ready-for-review transition
 
-1. Trigger only on `pull_request: types: [ready_for_review]`.
-2. Resolve Project #2 and the PR's existing Project item.
-3. Resolve the exact `Status` field and `In Review` option.
-4. Skip when the item is absent or already `In Review`.
-5. Update that one field.
-6. Re-read and verify the resulting value.
+The canonical implementation lives in:
 
-Reuse this repository's guarded single-select workflow semantics when extracting the
-shared implementation in M5. Until that shared path exists, do not copy a token into
-ad-hoc shell commands.
+`gyuniverse-hq/bid-change-validator/.github/workflows/project-ready-for-review.yml`
 
-## 5. Verification
+It uses Project node ID `PVT_kwDOEzfCi84BidwG`, so renaming the Project does not
+change the target. Store the credential as `PROJECT_AUTOMATION_TOKEN`; never place
+its value in YAML or source control.
 
-After configuration, verify with one non-critical test PR:
+The workflow:
 
-- Opening it causes auto-add.
-- Marking it ready for review results in `In Review`.
-- Merging it results in `Done`.
-- Closing a test Issue results in `Done`.
-- Priority remains unchanged throughout.
-- No Iteration field is required for the workflow.
+1. Triggers only on `pull_request: types: [ready_for_review]`.
+2. Resolves Project #2 and the PR's existing Project item.
+3. Resolves the exact `Status` field and `In Review` option.
+4. Skips when the item is absent or already `In Review`.
+5. Updates only that Status field.
+6. Re-reads and verifies the resulting value.
 
-Record the repository, item URL, before/after Status, and verification time. Then
-disable any temporary write credential or test-only workflow.
+This path was validated with a temporary Draft PR on 2026-09-05. The same pattern may
+be replicated into a temporary Phase 1 repository only when that repository needs the
+transition.
+
+## 6. Verification record
+
+Validated on the canonical repository:
+
+- PR auto-add -> `Backlog`: passed
+- Draft -> Ready for review -> `In Review`: passed
+- Close / Merge -> `Done`: passed
+- Priority remained unchanged: passed
+- No Iteration field required: passed
+
+After the Project rename, re-run a read-only inspection to confirm the new title and
+stable Project ID before reducing PAT permissions.

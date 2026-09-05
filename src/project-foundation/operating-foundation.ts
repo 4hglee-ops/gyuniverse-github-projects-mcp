@@ -7,7 +7,7 @@ export const TARGET_PROJECT = {
   owner: "gyuniverse-hq",
   number: 2,
   id: "PVT_kwDOEzfCi84BidwG",
-  title: "LOV WBS",
+  title: "Bid Change Validator · WBS",
 } as const;
 
 export const REQUIRED_STATUS_OPTIONS = ["Backlog", "Todo", "In Progress", "In Review", "Done"] as const;
@@ -512,7 +512,7 @@ function assertTargetProject(inspection: ProjectFoundationInspection): void {
   if (inspection.project.id !== TARGET_PROJECT.id
       || inspection.project.number !== TARGET_PROJECT.number
       || inspection.project.title !== TARGET_PROJECT.title) {
-    throw new Error("TARGET_PROJECT_MISMATCH: Refusing to configure a Project other than gyuniverse-hq/2 LOV WBS.");
+    throw new Error("TARGET_PROJECT_MISMATCH: Refusing to configure a Project other than gyuniverse-hq/2 Bid Change Validator · WBS.");
   }
 }
 

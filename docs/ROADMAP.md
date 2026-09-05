@@ -19,10 +19,33 @@
 - [x] Add safe inspection, dry-run, API apply, and verification code
 - [x] Decide **not to use Sprint / Iteration** for the initial operating model
 - [x] Update M4 apply so Iteration is optional and disabled by default
-- [ ] Create/verify Backlog / Active Work / My Work / Review Queue / Workstream views
-- [ ] Enable/verify Issue closed -> Done and PR merged -> Done
-- [ ] Configure Issue/PR auto-add for the three source repositories
-- [ ] Install PR ready for review -> In Review in the three source repositories
+- [x] Create/verify Backlog / Active Work / My Work / Review Queue / Workstream views
+- [x] Enable/verify Issue closed -> Done and PR merged -> Done
+- [x] Validate canonical repo auto-add -> Backlog
+- [x] Validate Draft -> Ready for review -> In Review
+- [x] Validate Close / Merge -> Done without changing Priority
+- [ ] Rename Project #2 from provisional `LOV WBS` to `Bid Change Validator · WBS`
+- [ ] Synchronize the code-level target title guard with the renamed Project
+- [ ] Document repository transition: three temporary weekend parallel repos -> canonical `bid-change-validator` repo with `develop` + feature branches
+- [ ] Restore PAT / Project permission posture to minimum read-only after M4 writes are complete
+
+Repository lifecycle:
+
+```text
+Phase 1 · weekend parallel development
+├── bid-change-validator-frontend
+├── bid-change-validator-backend
+└── bid-change-validator-llm-rag
+              ↓
+Phase 2 · integrated product
+bid-change-validator
+├── main
+└── develop
+    └── feature/*
+```
+
+`Bid Change Validator · WBS` remains the single Project work-management layer across
+both phases.
 
 See `M4_PROJECT_OPERATING_FOUNDATION.md` and `M4_PROJECT_UI_SETUP.md`.
 
