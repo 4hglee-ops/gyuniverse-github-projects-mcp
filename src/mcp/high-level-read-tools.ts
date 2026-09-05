@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { ProjectChangeService } from "../core/changes/project-change-service.js";
+import { IdentityContextService } from "../core/identity/identity-context-service.js";
 import type { AuthenticatedPrincipal } from "../core/identity/principal.js";
 import { HighLevelReadService } from "../core/reads/high-level-read-service.js";
 
@@ -49,6 +50,18 @@ export function registerHighLevelReadTools({
   principal = null,
   json,
 }: RegisterHighLevelReadToolsOptions): void {
+  const identity = new IdentityContextService(principal);
+
+  server.registerTool(
+    "get_identity_context",
+    {
+      description: "Return the current authenticated operator identity, role, permissions, and Project memberships without exposing access codes, bearer tokens, or secrets.",
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () => json(identity.getContext()),
+  );
+
   server.registerTool(
     "get_project_brief",
     {
