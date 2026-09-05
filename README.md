@@ -6,7 +6,7 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 
 ## Status
 
-**v0.2 / M2 implementation complete + M3 remote core in Draft PR**
+**v0.3 / M3 complete + M4 Project Operating Foundation in progress**
 
 - M1 local Projects MCP complete
 - M2 workflow intelligence complete
@@ -17,7 +17,8 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 - OAuth `projects:read` / `projects:write` separation
 - GitHub credential remains server-side only
 - Remote writes require OAuth write scope **and** the existing server-side write gates
-- Node and Vercel HTTP adapters implemented; production deployment pending
+- Node and Vercel HTTP adapters implemented and live-read validated
+- M4 Project #2 inspection and guarded operating-foundation setup available
 - No delete tools
 
 ## MCP tools
@@ -456,7 +457,7 @@ src/
 - [x] safer high-level Status / Priority mutation tools
 - [x] bounded process-local write audit log
 
-### M3 — remote MCP ◐ Vercel runtime implemented / production deployment pending
+### M3 — remote MCP ✅
 
 - [x] platform-neutral HTTP MCP request handler
 - [x] OAuth protected-resource metadata
@@ -471,16 +472,23 @@ src/
 - [x] Vercel Fetch deployment adapter and route rewrites
 - [x] Upstash Redis shared OAuth replay store
 - [x] fail-closed production store selection
-- [ ] Vercel project and Upstash Marketplace provisioning
-- [ ] production secret configuration
-- [ ] live ChatGPT connection smoke test
+- [x] Vercel project and Upstash Marketplace provisioning
+- [x] production secret configuration
+- [x] live ChatGPT connection smoke test
 - [ ] live Claude connection smoke test
 
-### M4 — Gyuniverse cross-context
+### M4 — Project Operating Foundation ◐
 
-- [ ] Discord Evidence ↔ GitHub Projects reconciliation
-- [ ] Decision / Work / Blocker cross-checking
-- [ ] unified Team Brief
+- [x] inspect Project #2, Status, Priority, Iteration, field IDs, and API access
+- [x] preserve existing Priority P0/P1/P2/P3
+- [x] add dry-run-first Iteration/view setup with write gates and re-read verification
+- [ ] choose and apply the Iteration cadence
+- [ ] create/verify Backlog, Current Sprint, My Work, Review Queue, and Workstream views
+- [ ] configure built-in close/merge/auto-add workflows
+- [ ] install ready-for-review Actions in the three source repositories
+
+See [`docs/M4_PROJECT_OPERATING_FOUNDATION.md`](docs/M4_PROJECT_OPERATING_FOUNDATION.md)
+and [`docs/M4_PROJECT_UI_SETUP.md`](docs/M4_PROJECT_UI_SETUP.md).
 
 ## Security
 
