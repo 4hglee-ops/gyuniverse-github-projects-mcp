@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { type AppConfig } from "../config.js";
+import { AuditService } from "../core/audit/audit-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { ProjectService, projectIdOf } from "../core/projects/project-service.js";
 import { SnapshotService } from "../core/snapshots/snapshot-service.js";
@@ -10,7 +11,7 @@ import { WorkflowService } from "../core/workflow/workflow-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { addItemToProject, updateProjectItemField } from "../github/projects.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
-import { registerWorkflowWriteTools, writeAuditLog } from "./workflow-write-tools.js";
+import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -29,10 +30,11 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
   const workflowService = new WorkflowService(snapshotService);
   const workItemService = new WorkItemService({ config, client, projects: projectService });
   const writePolicy = new WritePolicy(config);
+  const auditService = new AuditService(200);
   const resolveProject = projectService.resolveProject.bind(projectService);
 
   registerCheckpointTools({ server, client, resolveProject, json });
-  registerWorkflowWriteTools({ server, client, config, writePolicy, resolveProject, projectIdOf, json });
+  registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, projectIdOf, json });
 
   server.registerTool(
     "list_github_projects",
@@ -158,10 +160,10 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       writePolicy.authorize({ operation: "add_project_item", projectId });
       try {
         const result = await addItemToProject(client, projectId, contentId);
-        writeAuditLog.record({ operation: "add_project_item", outcome: "success", projectId, projectOwner: null, projectNumber: null, itemId: null, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: null });
+        auditService.record({ operation: "add_project_item", outcome: "success", projectId, projectOwner: null, projectNumber: null, itemId: null, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: null });
         return json(result);
       } catch (error) {
-        writeAuditLog.record({ operation: "add_project_item", outcome: "failed", projectId, projectOwner: null, projectNumber: null, itemId: null, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: "WRITE_FAILED" });
+        auditService.recordFailure({ operation: "add_project_item", projectId, projectOwner: null, projectNumber: null, itemId: null, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null }, error);
         throw error;
       }
     },
@@ -183,10 +185,10 @@ export function buildMcpServer({ config, client }: BuildServerOptions): McpServe
       writePolicy.authorize({ operation: "update_project_item_field", projectId });
       try {
         const result = await updateProjectItemField(client, projectId, itemId, fieldId, value);
-        writeAuditLog.record({ operation: "update_project_item_field", outcome: "success", projectId, projectOwner: null, projectNumber: null, itemId, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: null });
+        auditService.record({ operation: "update_project_item_field", outcome: "success", projectId, projectOwner: null, projectNumber: null, itemId, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: null });
         return json(result);
       } catch (error) {
-        writeAuditLog.record({ operation: "update_project_item_field", outcome: "failed", projectId, projectOwner: null, projectNumber: null, itemId, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null, verified: false, errorCode: "WRITE_FAILED" });
+        auditService.recordFailure({ operation: "update_project_item_field", projectId, projectOwner: null, projectNumber: null, itemId, fieldName: null, requestedValue: null, beforeValue: null, afterValue: null }, error);
         throw error;
       }
     },

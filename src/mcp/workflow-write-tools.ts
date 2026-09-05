@@ -1,19 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import { type AppConfig } from "../config.js";
+import { AuditService } from "../core/audit/audit-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { updateProjectSingleSelectByName } from "../workflow/single-select-update.js";
-import { WriteAuditLog, auditFailureFromError } from "../workflow/write-audit.js";
-
-export const writeAuditLog = new WriteAuditLog(200);
 
 interface RegisterWorkflowWriteToolsOptions {
   server: McpServer;
   client: GitHubGraphQlClient;
-  config: AppConfig;
   writePolicy: WritePolicy;
+  auditService: AuditService;
   resolveProject: (owner: string, number: number) => Promise<unknown>;
   projectIdOf: (project: unknown) => string;
   json: (value: unknown) => { content: Array<{ type: "text"; text: string }> };
@@ -44,7 +41,7 @@ async function runNamedUpdate(
       optionName: input.optionName,
     });
 
-    const audit = writeAuditLog.record({
+    const audit = options.auditService.record({
       operation: input.operation,
       outcome: result.changed ? "success" : "no_change",
       projectId,
@@ -61,7 +58,7 @@ async function runNamedUpdate(
 
     return options.json({ ...result, auditId: audit.id });
   } catch (error) {
-    writeAuditLog.record(auditFailureFromError({
+    options.auditService.recordFailure({
       operation: input.operation,
       projectId,
       projectOwner: input.owner,
@@ -71,7 +68,7 @@ async function runNamedUpdate(
       requestedValue: input.optionName,
       beforeValue: null,
       afterValue: null,
-    }, error));
+    }, error);
     throw error;
   }
 }
@@ -104,6 +101,6 @@ export function registerWorkflowWriteTools(options: RegisterWorkflowWriteToolsOp
       inputSchema: z.object({ limit: z.number().int().min(1).max(200).default(50), projectId: z.string().min(1).optional(), itemId: z.string().min(1).optional() }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ limit, projectId, itemId }) => options.json({ persistence: "process-local", entries: writeAuditLog.list({ limit, projectId, itemId }) }),
+    async ({ limit, projectId, itemId }) => options.json(options.auditService.list({ limit, projectId, itemId })),
   );
 }
