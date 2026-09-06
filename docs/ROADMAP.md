@@ -12,7 +12,7 @@
 | M7 Identity Foundation | Complete | Individual identity + permission model |
 | M8 High-level Write | Complete | Semantic write + idempotency + verify + audit |
 | M9 REST / GPT Actions | Complete | Operator GPT read/write adapter |
-| M10 Advanced Governance | Planned | Durable state / Bulk / Sub-issue / Dependency |
+| M10 Advanced Governance | In progress | Durable state / Bulk / Sub-issue / Dependency |
 
 ## M4 ✅
 - [x] Inspect Project #2 and preserve Priority P0 / P1 / P2 / P3
@@ -98,7 +98,7 @@ M6 rules:
 - do not infer a blocker merely from missing assignment or ordinary workflow status
 - preserve item URL/repository/number/status/priority/assignees as evidence
 - keep snapshot reads bounded by normalized snapshot coverage until pagination is expanded
-- checkpoint storage remains process-local; durable persistence remains M10
+- checkpoint storage may be durable in M10 Production; local development may remain process-local
 
 ## M7 ✅
 Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
@@ -180,14 +180,29 @@ REST adapter ─┘
 
 REST must not call MCP and MCP must not call REST.
 
-## M10
-- Persistent checkpoint
-- Durable audit
-- Sub-issues
-- Dependencies
-- Optional future sprint planning
-- Bulk Preview -> Approval -> Apply
-- richer ACL
+## M10 🟡
+Advanced Governance is implemented in bounded slices rather than one large mutation surface.
+
+### M10-1 Durable checkpoint
+- [x] Add checkpoint persistence abstraction
+- [x] Add namespaced Upstash latest-baseline storage
+- [x] Reuse existing Production Upstash credentials when OAuth replay already uses Upstash
+- [x] Preserve explicit/local memory fallback
+- [x] Validate restored baseline across independent service instances in tests
+- [x] Return persistence kind and restart-survival metadata
+- [ ] Production cross-request/redeploy validation
+
+### Remaining
+- [ ] M10-2 Durable write audit
+- [ ] M10-3 Dependency / sub-issue evidence reads
+- [ ] M10-4 Guarded relationship writes
+- [ ] M10-5 Bulk Preview -> Approval -> Apply
+- [ ] M10-6 Richer ACL
+- [ ] M10-7 Production validation / milestone close
+
+Iteration remains optional and is not reintroduced into Project #2 unless the operating model changes explicitly.
+
+See `M10_ADVANCED_GOVERNANCE.md`.
 
 ## Product direction
 Build an AI Project Operator, not a generic wrapper around every GitHub Projects API.
