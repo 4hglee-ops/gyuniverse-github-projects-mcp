@@ -3,9 +3,10 @@ import { z } from "zod";
 
 import { AuditService } from "../core/audit/audit-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
+import { HighLevelWriteService } from "../core/writes/high-level-write-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
-import { updateProjectSingleSelectByName } from "../workflow/single-select-update.js";
 import type { WriteAuditEntry } from "../workflow/write-audit.js";
+import { registerHighLevelWriteTools } from "./high-level-write-tools.js";
 
 interface RegisterWorkflowWriteToolsOptions {
   server: McpServer;
@@ -27,88 +28,40 @@ export function writeAuditSummary(audit: WriteAuditEntry) {
   };
 }
 
-async function runNamedUpdate(
-  options: RegisterWorkflowWriteToolsOptions,
-  input: {
-    owner: string;
-    number: number;
-    itemId: string;
-    optionName: string;
-    fieldName: "Status" | "Priority";
-    operation: "update_status" | "update_priority";
-  },
-) {
-  const project = await options.resolveProject(input.owner, input.number);
-  const projectId = options.projectIdOf(project);
-  const decision = options.writePolicy.authorize({ operation: input.operation, projectId });
-
-  try {
-    const result = await updateProjectSingleSelectByName(options.client, {
-      owner: input.owner,
-      projectNumber: input.number,
-      projectId,
-      itemId: input.itemId,
-      fieldName: input.fieldName,
-      optionName: input.optionName,
-    });
-
-    const audit = options.auditService.record({
-      operation: input.operation,
-      outcome: result.changed ? "success" : "no_change",
-      actorId: decision.actorId,
-      projectId,
-      projectOwner: input.owner,
-      projectNumber: input.number,
-      itemId: input.itemId,
-      fieldName: input.fieldName,
-      requestedValue: input.optionName,
-      beforeValue: result.before?.name ?? null,
-      afterValue: result.after?.name ?? null,
-      verified: result.verified,
-      errorCode: null,
-    });
-
-    return options.json({
-      ...result,
-      ...writeAuditSummary(audit),
-      auditPersistence: "process-local",
-    });
-  } catch (error) {
-    options.auditService.recordFailure({
-      operation: input.operation,
-      actorId: decision.actorId,
-      projectId,
-      projectOwner: input.owner,
-      projectNumber: input.number,
-      itemId: input.itemId,
-      fieldName: input.fieldName,
-      requestedValue: input.optionName,
-      beforeValue: null,
-      afterValue: null,
-    }, error);
-    throw error;
-  }
-}
-
 export function registerWorkflowWriteTools(options: RegisterWorkflowWriteToolsOptions): void {
+  const writes = new HighLevelWriteService({
+    client: options.client,
+    projects: { resolveProject: options.resolveProject },
+    writePolicy: options.writePolicy,
+    auditService: options.auditService,
+  });
+
+  // M8 semantic tools use Shared Core directly. The older MCP names remain as
+  // compatibility aliases and intentionally call the exact same service methods.
+  registerHighLevelWriteTools({ server: options.server, writes, json: options.json });
+
   options.server.registerTool(
     "update_github_project_item_status",
     {
-      description: "Safely set the Status of one item in an allowed GitHub Project using an exact Status option name. Verifies Project membership and re-reads the result after mutation. Returns a bounded actor-aware audit summary in the same response. Disabled by default.",
+      description: "Compatibility alias for the semantic Status write path. Safely sets one item's exact Status option by name with authorization, idempotency, verification, and actor-aware audit.",
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), itemId: z.string().min(1), status: z.string().min(1) }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, itemId, status }) => runNamedUpdate(options, { owner, number, itemId, optionName: status, fieldName: "Status", operation: "update_status" }),
+    async ({ owner, number, itemId, status }) => options.json(
+      await writes.updateWorkItemStatus(owner, number, itemId, status),
+    ),
   );
 
   options.server.registerTool(
     "update_github_project_item_priority",
     {
-      description: "Safely set the Priority of one item in an allowed GitHub Project using an exact Priority option name. Verifies Project membership and re-reads the result after mutation. Returns a bounded actor-aware audit summary in the same response. Disabled by default.",
+      description: "Compatibility alias for the semantic Priority write path. Safely sets one item's exact Priority option by name with authorization, idempotency, verification, and actor-aware audit.",
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), itemId: z.string().min(1), priority: z.string().min(1) }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, itemId, priority }) => runNamedUpdate(options, { owner, number, itemId, optionName: priority, fieldName: "Priority", operation: "update_priority" }),
+    async ({ owner, number, itemId, priority }) => options.json(
+      await writes.updateWorkItemPriority(owner, number, itemId, priority),
+    ),
   );
 
   options.server.registerTool(
