@@ -79,4 +79,22 @@ export function registerHighLevelWriteTools({ server, writes, json }: RegisterHi
       await writes.captureBacklog(owner, number, url),
     ),
   );
+
+  server.registerTool(
+    "create_work_item",
+    {
+      description: "Create a new GitHub Issue under the same authorized Project owner, capture it into the Project, and verify exact Backlog Status. Admin/PM only in the current policy. Pre-authorizes create, add, and status permissions before Issue creation and reports a partial-failure error containing the created Issue URL if Project capture later fails.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        number: z.number().int().min(1),
+        repository: z.string().min(1).regex(/^[A-Za-z0-9_.-]+$/),
+        title: z.string().trim().min(1).max(256),
+        body: z.string().max(65536).optional(),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ owner, number, repository, title, body }) => json(
+      await writes.createWorkItem(owner, number, repository, title, body ?? null),
+    ),
+  );
 }

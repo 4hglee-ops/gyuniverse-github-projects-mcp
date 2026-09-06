@@ -12,6 +12,11 @@ import {
   type CaptureBacklogWorkItemReader,
 } from "../../workflow/capture-backlog.js";
 import {
+  createGitHubIssue,
+  type CreatedIssue,
+  type CreateIssueInput,
+} from "../../workflow/create-work-item.js";
+import {
   updateProjectSingleSelectByName,
   type NamedSingleSelectUpdateResult,
 } from "../../workflow/single-select-update.js";
@@ -23,6 +28,7 @@ export interface HighLevelWriteProjectReader {
 type NamedSingleSelectUpdater = typeof updateProjectSingleSelectByName;
 type WorkItemAssigner = typeof assignProjectWorkItem;
 type BacklogCapturer = typeof captureProjectBacklogItem;
+type IssueCreator = typeof createGitHubIssue;
 
 export interface HighLevelWriteServiceOptions {
   client: GitHubGraphQlClient;
@@ -33,6 +39,7 @@ export interface HighLevelWriteServiceOptions {
   updateNamedSingleSelect?: NamedSingleSelectUpdater;
   assignWorkItem?: WorkItemAssigner;
   captureBacklog?: BacklogCapturer;
+  createIssue?: IssueCreator;
 }
 
 interface AuditEnvelope {
@@ -46,6 +53,12 @@ interface AuditEnvelope {
 export interface HighLevelWriteResult extends NamedSingleSelectUpdateResult, AuditEnvelope {}
 export interface HighLevelAssignResult extends AssignWorkItemResult, AuditEnvelope {}
 export interface HighLevelCaptureBacklogResult extends CaptureBacklogResult, AuditEnvelope {}
+export interface HighLevelCreateWorkItemResult extends AuditEnvelope {
+  changed: true;
+  verified: boolean;
+  issue: CreatedIssue;
+  capture: CaptureBacklogResult;
+}
 
 interface NamedUpdateInput {
   owner: string;
@@ -72,11 +85,13 @@ export class HighLevelWriteService {
   private readonly updateNamedSingleSelect: NamedSingleSelectUpdater;
   private readonly assignProjectWorkItem: WorkItemAssigner;
   private readonly captureProjectBacklogItem: BacklogCapturer;
+  private readonly createIssue: IssueCreator;
 
   constructor(private readonly options: HighLevelWriteServiceOptions) {
     this.updateNamedSingleSelect = options.updateNamedSingleSelect ?? updateProjectSingleSelectByName;
     this.assignProjectWorkItem = options.assignWorkItem ?? assignProjectWorkItem;
     this.captureProjectBacklogItem = options.captureBacklog ?? captureProjectBacklogItem;
+    this.createIssue = options.createIssue ?? createGitHubIssue;
   }
 
   async updateWorkItemStatus(
@@ -185,7 +200,6 @@ export class HighLevelWriteService {
     const project = await this.options.projects.resolveProject(owner, number);
     const projectId = projectIdOf(project);
 
-    // Fail before the first mutation unless the principal may both add an item and set Status.
     const addDecision = this.options.writePolicy.authorize({ operation: "add_project_item", projectId });
     this.options.writePolicy.authorize({ operation: "update_status", projectId });
 
@@ -233,6 +247,87 @@ export class HighLevelWriteService {
         beforeValue: null,
         afterValue: null,
       }, error);
+      throw error;
+    }
+  }
+
+  async createWorkItem(
+    owner: string,
+    number: number,
+    repository: string,
+    title: string,
+    body?: string | null,
+  ): Promise<HighLevelCreateWorkItemResult> {
+    if (!this.options.workItems) {
+      throw new Error("CREATE_WORK_ITEM_NOT_CONFIGURED: Work item resolver is unavailable.");
+    }
+
+    const project = await this.options.projects.resolveProject(owner, number);
+    const projectId = projectIdOf(project);
+
+    // Pre-authorize the full chain before creating a repository Issue.
+    const createDecision = this.options.writePolicy.authorize({ operation: "create_work_item", projectId });
+    this.options.writePolicy.authorize({ operation: "add_project_item", projectId });
+    this.options.writePolicy.authorize({ operation: "update_status", projectId });
+
+    let issue: CreatedIssue | null = null;
+    try {
+      const createInput: CreateIssueInput = { owner, repository, title, body };
+      issue = await this.createIssue(this.options.client, createInput);
+      const capture = await this.captureProjectBacklogItem(
+        this.options.client,
+        this.options.workItems,
+        { owner, projectNumber: number, projectId, url: issue.url },
+      );
+
+      const verified = capture.verified && capture.status.after?.name === "Backlog";
+      if (!verified) {
+        throw new Error("MUTATION_VERIFICATION_FAILED: Created Issue was not verified in Backlog.");
+      }
+
+      const audit = this.options.auditService.record({
+        operation: "create_work_item",
+        outcome: "success",
+        actorId: createDecision.actorId,
+        projectId,
+        projectOwner: owner,
+        projectNumber: number,
+        itemId: capture.itemId,
+        fieldName: "Status",
+        requestedValue: "Backlog",
+        beforeValue: null,
+        afterValue: capture.status.after?.name ?? null,
+        verified,
+        errorCode: null,
+      });
+
+      return {
+        changed: true,
+        verified,
+        issue,
+        capture,
+        auditId: audit.id,
+        actorId: audit.actorId,
+        operation: "create_work_item",
+        outcome: "success",
+        auditPersistence: "process-local",
+      };
+    } catch (error) {
+      this.options.auditService.recordFailure({
+        operation: "create_work_item",
+        actorId: createDecision.actorId,
+        projectId,
+        projectOwner: owner,
+        projectNumber: number,
+        itemId: null,
+        fieldName: "Status",
+        requestedValue: "Backlog",
+        beforeValue: null,
+        afterValue: null,
+      }, error);
+      if (issue) {
+        throw new Error(`CREATE_WORK_ITEM_PARTIAL_FAILURE: Issue '${issue.url}' was created but Project capture failed. ${(error as Error).message}`);
+      }
       throw error;
     }
   }

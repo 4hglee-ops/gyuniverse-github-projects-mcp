@@ -4,6 +4,7 @@ export type ProjectPermission =
   | "project.read"
   | "project.write"
   | "item.add"
+  | "item.create"
   | "item.assign"
   | "item.update_field"
   | "item.update_status"
@@ -24,6 +25,7 @@ const ROLE_PERMISSIONS: Record<ProjectRole, readonly ProjectPermission[]> = {
     "project.read",
     "project.write",
     "item.add",
+    "item.create",
     "item.assign",
     "item.update_field",
     "item.update_status",
