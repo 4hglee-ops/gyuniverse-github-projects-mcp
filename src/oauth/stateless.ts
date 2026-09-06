@@ -11,6 +11,9 @@ export interface RegisteredClientPayload {
   typ: "registered_client";
   redirectUris: string[];
   clientName?: string;
+  // New registrations store the effective method. Older signed client IDs omit
+  // it; both remain public_pkce regardless of the originally requested method.
+  tokenEndpointAuthMethod?: "none";
   iat: number;
 }
 

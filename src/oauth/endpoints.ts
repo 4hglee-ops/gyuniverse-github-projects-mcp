@@ -122,7 +122,13 @@ export async function registerOAuthClient(request: Request): Promise<Response> {
     );
   }
 
-  if (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== "none") {
+  // RFC 7591 allows substituting requested metadata with the effective value
+  // returned in the registration response. These requests still create ONLY
+  // public S256 PKCE clients; no confidential DCR credentials are issued.
+  if (body.token_endpoint_auth_method
+    && body.token_endpoint_auth_method !== "none"
+    && body.token_endpoint_auth_method !== "client_secret_basic"
+    && body.token_endpoint_auth_method !== "client_secret_post") {
     logRegistrationRejection("unsupported_token_endpoint_auth_method", body);
     return noStoreJson(
       { error: "invalid_client_metadata", error_description: "Dynamic registration supports public PKCE clients only." },
@@ -148,6 +154,7 @@ export async function registerOAuthClient(request: Request): Promise<Response> {
     typ: "registered_client",
     redirectUris,
     clientName: body.client_name?.slice(0, 120),
+    tokenEndpointAuthMethod: "none",
     iat: nowSeconds(),
   };
   const clientId = await signEnvelope("gyprc", payload);
@@ -158,7 +165,7 @@ export async function registerOAuthClient(request: Request): Promise<Response> {
       client_id_issued_at: payload.iat,
       client_name: payload.clientName ?? "Gyuniverse GitHub Projects MCP client",
       redirect_uris: redirectUris,
-      token_endpoint_auth_method: "none",
+      token_endpoint_auth_method: payload.tokenEndpointAuthMethod,
       grant_types: requestedGrants,
       response_types: ["code"],
     },
