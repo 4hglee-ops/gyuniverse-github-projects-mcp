@@ -46,6 +46,12 @@ Use the deployed OpenAPI document:
 - Scope: `projects:read projects:write`
 - Token exchange: `client_secret_basic` or `client_secret_post`
 
+After a deployment adds or renames Actions operations, re-import the deployed
+`/openapi.json` document in the Custom GPT editor and save/update the GPT. The
+editor does not discover MCP tool registrations automatically. If OAuth client,
+callback and scopes are unchanged, this schema refresh does not itself require a
+new client secret or a different OAuth configuration.
+
 Copy the callback URL shown by the GPT editor exactly. Supported Custom GPT callback shapes are:
 
 - `https://chatgpt.com/aip/g-.../oauth/callback`

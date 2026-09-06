@@ -25,7 +25,11 @@ test("REST API returns 404 outside the versioned surface", async () => {
 test("REST write routes are explicitly separated from read routes", () => {
   assert.equal(restPathRequiresWrite("/api/v1/write/status"), true);
   assert.equal(restPathRequiresWrite("/api/v1/write/create-work-item"), true);
+  assert.equal(restPathRequiresWrite("/api/v1/write/relationship/add-sub-issue"), true);
+  assert.equal(restPathRequiresWrite("/api/v1/write/bulk/apply"), true);
   assert.equal(restPathRequiresWrite("/api/v1/project/backlog"), false);
+  assert.equal(restPathRequiresWrite("/api/v1/project/item-relationships"), false);
+  assert.equal(restPathRequiresWrite("/api/v1/project/bulk-plan"), false);
   assert.equal(restPathRequiresWrite("/api/v1/identity"), false);
 });
 

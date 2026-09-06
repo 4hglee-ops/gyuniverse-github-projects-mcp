@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { type AppConfig } from "../config.js";
 import { AuditService } from "../core/audit/audit-service.js";
+import { createM10GovernanceServices } from "../core/governance/m10-services.js";
 import { ProjectChangeService } from "../core/changes/project-change-service.js";
 import type { AuthenticatedPrincipal } from "../core/identity/principal.js";
 import { ProjectMutationService } from "../core/mutations/project-mutation-service.js";
@@ -16,12 +17,8 @@ import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
 import { registerHighLevelReadTools } from "./high-level-read-tools.js";
 import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
-import { ProjectRelationshipService } from "../core/relationships/project-relationship-service.js";
 import { registerRelationshipTools } from "./relationship-tools.js";
-import { RelationshipWriteService } from "../core/relationships/relationship-write-service.js";
 import { registerRelationshipWriteTools } from "./relationship-write-tools.js";
-import { BulkPlanService } from "../core/bulk/bulk-plan-service.js";
-import { createBulkPlanStore } from "../core/bulk/bulk-plan-store-factory.js";
 import { registerBulkPlanTools } from "./bulk-plan-tools.js";
 
 export interface BuildServerOptions {
@@ -47,21 +44,24 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   const auditService = new AuditService(200);
   const mutationService = new ProjectMutationService({ client, writePolicy, auditService });
   const resolveProject = projectService.resolveProject.bind(projectService);
+  const governance = createM10GovernanceServices({
+    config,
+    client,
+    principal,
+    projects: projectService,
+    writePolicy,
+    audit: auditService,
+  });
 
-  registerRelationshipTools(server, new ProjectRelationshipService({ config, client, projects: projectService }));
-  registerRelationshipWriteTools(server, new RelationshipWriteService({ principal, client, projects: projectService,
-    reads: new ProjectRelationshipService({ config, client, projects: projectService }), writePolicy, audit: auditService }));
+  registerRelationshipTools(server, governance.relationships);
+  registerRelationshipWriteTools(server, governance.relationshipWrites);
 
   registerCheckpointTools({ server, changes: changeService, json });
   registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, principal, json });
   registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, workItems: workItemService, projectIdOf, json });
   registerBulkPlanTools({
     server,
-    bulk: new BulkPlanService({
-      client, projects: { resolveProject }, principal, writePolicy, audit: auditService,
-      store: createBulkPlanStore(),
-      bulkApprovalMode: config.bulkApprovalMode,
-    }),
+    bulk: governance.bulk,
     json,
   });
 
