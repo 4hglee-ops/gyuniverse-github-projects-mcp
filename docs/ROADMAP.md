@@ -10,8 +10,8 @@
 | M5 Shared Core | Complete | Separate transport from business logic |
 | M6 High-level Read | Complete | Brief / My Work / Backlog / Review / Blockers / Changes |
 | M7 Identity Foundation | Complete | Individual identity + permission model |
-| M8 High-level Write | Planned | Semantic write + idempotency + verify + audit |
-| M9 REST / GPT Actions | Planned | Operator GPT read/write adapter |
+| M8 High-level Write | Complete | Semantic write + idempotency + verify + audit |
+| M9 REST / GPT Actions | In progress | Operator GPT read/write adapter |
 | M10 Advanced Governance | Planned | Durable state / Bulk / Sub-issue / Dependency |
 
 ## M4 ✅
@@ -44,14 +44,12 @@ bid-change-validator
     └── feature/*
 ```
 
-`Bid Change Validator · WBS` remains the single Project work-management layer across
-both phases.
+`Bid Change Validator · WBS` remains the single Project work-management layer across both phases.
 
 See `M4_PROJECT_OPERATING_FOUNDATION.md` and `M4_PROJECT_UI_SETUP.md`.
 
 ## M5 ✅
-Shared Core extraction was completed incrementally without rewriting the working MCP
-adapter.
+Shared Core extraction was completed incrementally without rewriting the working MCP adapter.
 
 ### Completed boundaries
 - [x] `ProjectService`: Project owner / node-ID allowlist boundary and core Project reads
@@ -82,34 +80,24 @@ future REST / GPT Actions adapter
    └──────────── uses the same Shared Core ────────────┘
 ```
 
-M5 rule remains authoritative: do not build REST -> MCP -> GitHub or MCP -> REST -> GitHub.
-Both adapters call Shared Core directly.
-
-Remaining intentionally later:
-- individual Identity / Membership / Role / Permission: M7
-- high-level semantic write orchestration and idempotency: M8
-- REST / GPT Actions transport adapter: M9
-- durable audit/checkpoint persistence: M10
+M5 rule remains authoritative: do not build REST -> MCP -> GitHub or MCP -> REST -> GitHub. Both adapters call Shared Core directly.
 
 ## M6 ✅
-High-level semantic reads are implemented in Shared Core and exposed through thin MCP
-tools. Results stay evidence-based and preserve the snapshot/checkpoint coverage boundary.
+High-level semantic reads are implemented in Shared Core and exposed through thin MCP tools. Results stay evidence-based and preserve the snapshot/checkpoint coverage boundary.
 
-- [x] `get_project_brief`: workflow/priority counts plus active, review, unassigned, and explicit blocker focus
-- [x] `get_my_work`: assignee-focused work; explicit GitHub login until M7 identity exists
-- [x] `get_backlog`: items with Status = Backlog
-- [x] `get_review_queue`: items with Status = In Review
-- [x] `get_unassigned_work`: non-completed items with no assignee evidence
-- [x] `get_blockers`: explicit Blocked status/fields/reasons only; no blocker inference from ordinary workflow state
-- [x] `get_project_changes`: shared process-local checkpoint baseline plus semantic change groups
-- [x] Existing checkpoint create/compare tools and `get_project_changes` use the same `ProjectChangeService` baseline
+- [x] `get_project_brief`
+- [x] `get_my_work`
+- [x] `get_backlog`
+- [x] `get_review_queue`
+- [x] `get_unassigned_work`
+- [x] `get_blockers`
+- [x] `get_project_changes`
 
 M6 rules:
 - do not infer Done from assignment, intention, or open PR state
 - do not infer a blocker merely from missing assignment or ordinary workflow status
 - preserve item URL/repository/number/status/priority/assignees as evidence
 - keep snapshot reads bounded by normalized snapshot coverage until pagination is expanded
-- treat entered/left membership deltas as authoritative only when both checkpoint windows are complete
 - checkpoint storage remains process-local; durable persistence remains M10
 
 ## M7 ✅
@@ -123,59 +111,64 @@ Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
 - [x] Pass OAuth request principal into the Shared Core write boundary
 - [x] Add `MCP_OAUTH_IDENTITIES_JSON` registry for individual OAuth subjects, roles, GitHub login, and Project memberships
 - [x] Bind individual access codes to stable OAuth subjects during authorization
-- [x] Resolve remote principals from individual subject on each request so role/membership changes take effect without changing adapter contracts
 - [x] Enforce per-principal Project membership before writes
 - [x] Propagate actor identity into mutation audit records
-- [x] Make authenticated identity authoritative for `get_my_work`; login cannot impersonate another identity
-- [x] Apply principal `project.read` + Project membership to Project reads, snapshots, high-level reads, analysis, and checkpoint/change paths through `ProjectService`
-- [x] Return actor-aware audit metadata directly in Status/Priority write responses for serverless-safe validation
-- [x] Validate Admin identity, read, no-change Status write, verification, and `actorId` in Production
-- [x] Validate Member identity and no-change Status write in Production
-- [x] Validate Member generic field mutation is denied with `PERMISSION_DENIED`
-- [x] Validate Viewer Project read succeeds and write is denied with `PERMISSION_DENIED`
+- [x] Make authenticated identity authoritative for `get_my_work`
+- [x] Apply principal `project.read` + Project membership to reads/snapshots/analysis
+- [x] Validate Admin / Member / Viewer live behavior
 - [x] Remove legacy shared-team write authorization; compatibility subject is read-only only
 
-Target role shape:
-- Admin / PM: broad Project read/write within policy
-- Member: selected writes according to permission policy
-- Viewer: read-only
-
 Current permission baseline:
-- Admin: Project read/write + add item + generic field/status/priority writes
-- Member: Project read/write + add item + status/priority writes; no unrestricted generic field mutation
+- Admin: Project read/write + create/add/assign + generic field/status/priority writes
+- Member: Project read/write + add item + status/priority writes; no create/assign/unrestricted generic field mutation
 - Viewer: Project read-only
 
-Individual OAuth identities are configured server-side. Access codes are credentials and
-must never be committed, logged, or pasted into project documentation. The registry
-stores only the configured identity model at runtime; tokens carry the stable subject,
-and role/Project membership are resolved again from the server registry on requests.
+## M8 ✅
+High-level semantic writes are implemented in Shared Core and exposed through MCP.
 
-Authenticated remote reads fail closed at the shared `ProjectService` boundary when
-the principal lacks `project.read` or membership in the target Project. Local/stdio
-calls without a principal retain the existing server allowlist behavior for development
-compatibility.
-
-The legacy shared-team subject is retained only as a temporary read-only compatibility
-path. Possession of the old team code can no longer produce an Admin principal or grant
-Project write permissions, even when the OAuth token contains `projects:write`.
-
-Multiple authorized users may receive write permissions through individual identities.
-The server credential remains the backend capability; authenticated Identity / ACL decides
-which user may invoke which operation.
-
-## M8
-High-level writes:
-- captureBacklog
-- createWorkItem
-- assignWorkItem
-- startWork
-- updateWorkItemStatus
-- updateWorkItemPriority
+- [x] `captureBacklog`
+- [x] `createWorkItem`
+- [x] `assignWorkItem`
+- [x] `startWork`
+- [x] `updateWorkItemStatus`
+- [x] `updateWorkItemPriority`
+- [x] Pre-authorize operation chains before first mutation where multiple permissions are required
+- [x] Preserve idempotency for status/priority/start/assign/capture paths
+- [x] Return same-operation actor-aware audit metadata
+- [x] Validate `createWorkItem` in Production: Issue create -> Project capture -> Backlog -> verification
+- [x] Fix stale post-add Project-list false negative by using the add mutation's Project item node ID and direct exact-item verification
 
 Iteration-specific write is not part of the initial Project #2 operating model.
 
-## M9
+## M9 🟡
 Add a semantic REST/GPT Actions adapter that uses the same Shared Core as MCP.
+
+### Completed
+- [x] M9-1 OAuth-protected REST read adapter
+- [x] M9-1 public OpenAPI 3.1 discovery document
+- [x] M9-1 Vercel routing + Production smoke test
+- [x] M9-2 REST write adapter backed directly by `HighLevelWriteService`
+- [x] M9-3 OpenAPI write operations with `projects:read` + `projects:write`
+- [x] M9-4 Action-safe error envelope with `category / retryable / userAction`
+- [x] M9-4 Explicit no-auto-retry guidance for `CREATE_WORK_ITEM_PARTIAL_FAILURE`
+- [x] M9-4 Re-read-before-retry guidance for ambiguous verification failures
+
+### Remaining
+- [ ] M9-5 Connect GPT Actions to `/openapi.json` with OAuth
+- [ ] M9-5 Validate read action with an individual identity
+- [ ] M9-5 Validate safe no-change write and actor audit metadata
+- [ ] M9-5 Validate permission denial behavior through GPT Actions
+- [ ] M9-6 Final documentation / Production evidence / milestone close
+
+M9 architecture rule remains authoritative:
+
+```text
+MCP adapter  ─┐
+              ├─ Shared Core ── GitHub GraphQL
+REST adapter ─┘
+```
+
+REST must not call MCP and MCP must not call REST.
 
 ## M10
 - Persistent checkpoint

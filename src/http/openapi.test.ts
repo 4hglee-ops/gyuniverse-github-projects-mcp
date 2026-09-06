@@ -7,6 +7,7 @@ import { handleRemoteHttpRequest } from "./router.js";
 test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", () => {
   const document = openApiDocument("https://example.test");
   assert.equal(document.openapi, "3.1.0");
+  assert.equal(document.info.version, "0.3.0");
   assert.ok(document.paths["/api/v1/identity"]);
   assert.ok(document.paths["/api/v1/project/brief"]);
   assert.ok(document.paths["/api/v1/project/my-work"]);
@@ -20,18 +21,23 @@ test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", (
   assert.ok(document.paths["/api/v1/write/assign"]);
   assert.ok(document.paths["/api/v1/write/capture-backlog"]);
   assert.ok(document.paths["/api/v1/write/create-work-item"]);
-  assert.equal(
-    document.components.securitySchemes.oauth2.flows.authorizationCode.authorizationUrl,
-    "https://example.test/oauth/authorize",
-  );
-  assert.equal(
-    document.components.securitySchemes.oauth2.flows.authorizationCode.tokenUrl,
-    "https://example.test/oauth/token",
-  );
-  assert.deepEqual(
-    document.paths["/api/v1/write/status"].post.security,
-    [{ oauth2: ["projects:read", "projects:write"] }],
-  );
+  assert.equal(document.components.securitySchemes.oauth2.flows.authorizationCode.authorizationUrl, "https://example.test/oauth/authorize");
+  assert.equal(document.components.securitySchemes.oauth2.flows.authorizationCode.tokenUrl, "https://example.test/oauth/token");
+  assert.deepEqual(document.paths["/api/v1/write/status"].post.security, [{ oauth2: ["projects:read", "projects:write"] }]);
+});
+
+test("OpenAPI tells actions not to blindly retry non-idempotent partial failures", () => {
+  const document = openApiDocument("https://example.test");
+  const create = document.paths["/api/v1/write/create-work-item"].post;
+  assert.match(create.description, /not idempotent/i);
+  assert.match(create.description, /Never automatically retry CREATE_WORK_ITEM_PARTIAL_FAILURE/);
+
+  const errorSchema = create.responses["400"].content["application/json"].schema;
+  const error = errorSchema.properties.error;
+  assert.deepEqual(error.required, ["code", "message", "category", "retryable", "userAction"]);
+  assert.ok(error.properties.retryable);
+  assert.ok(error.properties.userAction);
+  assert.ok(error.properties.category);
 });
 
 test("router serves OpenAPI without OAuth", async () => {
