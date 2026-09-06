@@ -236,13 +236,26 @@ Advanced Governance is implemented in bounded slices rather than one large mutat
 - [x] Recheck current approver/applier and underlying item capabilities before mutation
 - [x] Preserve bounded durable audit compatibility with optional capability metadata
 - [x] Local ACL, maker-checker, tool-exposure and M10 regression coverage
-- [ ] Review and Production validation
+- [x] Review and Production validation
+
+M10-6 is complete. PR #47 was merged as `a24764b` and the matching Production
+deployment reached `READY`. The connected Production Admin identity exposed
+`item.relationship.write`, `bulk.preview`, `bulk.approve`, and `bulk.apply`;
+`gyuniverse-hq` Project #2 remained readable while the actor login remained the
+distinct `4hglee-ops` identity. Existing Upstash audit, checkpoint, and bulk-plan
+correlation evidence remained readable. The 236-test ACL suite covers the
+Viewer/Member runtime denials and existing Member single-item compatibility.
+
+Direct Viewer/Member role-specific Production OAuth reconnection is deliberately
+deferred to M10-7 because those identities were not connected for this smoke. It
+is follow-up validation, not an M10-6 completion blocker. No relationship or bulk
+mutation was repeated for this closeout.
 
 ### Remaining
 - [x] M10-4 review / Production validation and close
 - [x] M10-5 review / Production validation and close
-- [ ] M10-6 review / Production validation and close
-- [ ] M10-7 Production validation / milestone close
+- [x] M10-6 Richer ACL — Complete
+- [ ] M10-7 Production validation / milestone close — Next
 
 Iteration remains optional and is not reintroduced into Project #2 unless the operating model changes explicitly.
 
