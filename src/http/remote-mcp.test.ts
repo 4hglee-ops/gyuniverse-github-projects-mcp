@@ -74,28 +74,24 @@ test("individual subject resolves role, login, and Project memberships from regi
       projectIds: ["PVT_PROJECT"],
     },
   ]);
-  const principal = resolveRemotePrincipal(
-    "user:honggyu",
-    "projects:read projects:write",
-    base,
-    registry,
-  );
+  const principal = resolveRemotePrincipal("user:honggyu", base, registry);
   assert.equal(principal?.id, "user:honggyu");
   assert.equal(principal?.githubLogin, "4hglee-ops");
   assert.equal(principal?.role, "admin");
   assert.deepEqual(principal?.projectIds, ["PVT_PROJECT"]);
 });
 
-test("unknown individual subject fails closed while legacy team subject keeps temporary compatibility", () => {
+test("unknown individual subject fails closed", () => {
   const empty = new OAuthIdentityRegistry([]);
-  assert.equal(resolveRemotePrincipal("user:unknown", "projects:read", base, empty), null);
+  assert.equal(resolveRemotePrincipal("user:unknown", base, empty), null);
+});
 
-  const legacy = resolveRemotePrincipal(
-    "gyuniverse-projects-team",
-    "projects:read projects:write",
-    base,
-    empty,
-  );
-  assert.equal(legacy?.role, "admin");
+test("legacy team subject is always read-only after individual identity migration", () => {
+  const empty = new OAuthIdentityRegistry([]);
+  const legacy = resolveRemotePrincipal("gyuniverse-projects-team", base, empty);
+
+  assert.equal(legacy?.role, "viewer");
+  assert.equal(legacy?.permissions.includes("project.read"), true);
+  assert.equal(legacy?.permissions.includes("project.write"), false);
   assert.deepEqual(legacy?.projectIds, ["PVT_PROJECT"]);
 });

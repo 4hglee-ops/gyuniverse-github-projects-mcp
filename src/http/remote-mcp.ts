@@ -47,7 +47,6 @@ export function configForRemoteScope(config: AppConfig, scope: string): AppConfi
 
 export function resolveRemotePrincipal(
   subject: string,
-  scope: string,
   config: AppConfig,
   registry = OAuthIdentityRegistry.fromEnvironment(),
 ): AuthenticatedPrincipal | null {
@@ -55,17 +54,11 @@ export function resolveRemotePrincipal(
   if (individual) return individual;
 
   if (subject !== LEGACY_TEAM_SUBJECT) return null;
-  return scopeIncludes(scope, OAUTH_WRITE_SCOPE)
-    ? principalForRole(subject, "admin", {
-        source: "oauth",
-        displayName: "Legacy team OAuth principal",
-        projectIds: config.allowedProjectIds,
-      })
-    : principalForRole(subject, "viewer", {
-        source: "oauth",
-        displayName: "Legacy team OAuth principal",
-        projectIds: config.allowedProjectIds,
-      });
+  return principalForRole(subject, "viewer", {
+    source: "oauth",
+    displayName: "Legacy team OAuth principal (read-only)",
+    projectIds: config.allowedProjectIds,
+  });
 }
 
 export async function handleRemoteMcpRequest(
@@ -84,7 +77,7 @@ export async function handleRemoteMcpRequest(
   const baseConfig = options?.config ?? loadConfig();
   const effectiveConfig = configForRemoteScope(baseConfig, access.scope);
   const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
-  const principal = resolveRemotePrincipal(access.sub, access.scope, effectiveConfig);
+  const principal = resolveRemotePrincipal(access.sub, effectiveConfig);
   if (!principal) return unauthorized();
 
   const handler = createMcpHandler(() => buildMcpServer({

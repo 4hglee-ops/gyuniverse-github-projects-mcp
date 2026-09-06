@@ -9,7 +9,7 @@
 | M4 Project Operating Foundation | Complete | Priority / Views / Native automation / no-sprint continuous flow |
 | M5 Shared Core | Complete | Separate transport from business logic |
 | M6 High-level Read | Complete | Brief / My Work / Backlog / Review / Blockers / Changes |
-| M7 Identity Foundation | In progress | Individual identity + permission model |
+| M7 Identity Foundation | Complete | Individual identity + permission model |
 | M8 High-level Write | Planned | Semantic write + idempotency + verify + audit |
 | M9 REST / GPT Actions | Planned | Operator GPT read/write adapter |
 | M10 Advanced Governance | Planned | Durable state / Bulk / Sub-issue / Dependency |
@@ -112,10 +112,10 @@ M6 rules:
 - treat entered/left membership deltas as authoritative only when both checkpoint windows are complete
 - checkpoint storage remains process-local; durable persistence remains M10
 
-## M7 ◐
+## M7 ✅
 Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
 
-### Completed / current
+### Completed
 - [x] Add `AuthenticatedPrincipal`, `ProjectRole`, and `ProjectPermission` models
 - [x] Define Admin / Member / Viewer permission matrix
 - [x] Add `IdentityPolicy` permission checks
@@ -126,11 +126,14 @@ Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
 - [x] Resolve remote principals from individual subject on each request so role/membership changes take effect without changing adapter contracts
 - [x] Enforce per-principal Project membership before writes
 - [x] Propagate actor identity into mutation audit records
-- [x] Preserve legacy shared-team OAuth compatibility during migration
 - [x] Make authenticated identity authoritative for `get_my_work`; login cannot impersonate another identity
 - [x] Apply principal `project.read` + Project membership to Project reads, snapshots, high-level reads, analysis, and checkpoint/change paths through `ProjectService`
-- [ ] Remove legacy shared-team write authorization after migration
-- [ ] Complete M7 validation with at least one Admin, Member, and Viewer identity
+- [x] Return actor-aware audit metadata directly in Status/Priority write responses for serverless-safe validation
+- [x] Validate Admin identity, read, no-change Status write, verification, and `actorId` in Production
+- [x] Validate Member identity and no-change Status write in Production
+- [x] Validate Member generic field mutation is denied with `PERMISSION_DENIED`
+- [x] Validate Viewer Project read succeeds and write is denied with `PERMISSION_DENIED`
+- [x] Remove legacy shared-team write authorization; compatibility subject is read-only only
 
 Target role shape:
 - Admin / PM: broad Project read/write within policy
@@ -147,14 +150,18 @@ must never be committed, logged, or pasted into project documentation. The regis
 stores only the configured identity model at runtime; tokens carry the stable subject,
 and role/Project membership are resolved again from the server registry on requests.
 
-Authenticated remote reads now fail closed at the shared `ProjectService` boundary when
+Authenticated remote reads fail closed at the shared `ProjectService` boundary when
 the principal lacks `project.read` or membership in the target Project. Local/stdio
 calls without a principal retain the existing server allowlist behavior for development
 compatibility.
 
-Multiple authorized users may receive write permissions. The server credential remains
-the backend capability; authenticated Identity / ACL decides which user may invoke
-which operation.
+The legacy shared-team subject is retained only as a temporary read-only compatibility
+path. Possession of the old team code can no longer produce an Admin principal or grant
+Project write permissions, even when the OAuth token contains `projects:write`.
+
+Multiple authorized users may receive write permissions through individual identities.
+The server credential remains the backend capability; authenticated Identity / ACL decides
+which user may invoke which operation.
 
 ## M8
 High-level writes:
