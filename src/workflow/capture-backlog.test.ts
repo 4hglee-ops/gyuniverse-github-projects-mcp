@@ -48,13 +48,14 @@ function status(itemId: string, changed: boolean) {
   };
 }
 
-test("capture backlog adds a missing Project item then verifies Backlog", async () => {
+test("capture backlog uses the add mutation item ID and verifies Backlog without a stale list re-read", async () => {
   let reads = 0;
   let adds = 0;
+  const updatedItemIds: string[] = [];
   const reader: CaptureBacklogWorkItemReader = {
     async resolveProjectItem() {
       reads += 1;
-      return reads === 1 ? resolution(false, null) : resolution(true, "PVTI_NEW");
+      return resolution(false, null);
     },
   };
 
@@ -69,17 +70,45 @@ test("capture backlog adds a missing Project item then verifies Backlog", async 
     },
     {
       async addItem() { adds += 1; return { id: "PVTI_NEW" }; },
-      async updateNamedSingleSelect(_client, input) { return status(input.itemId, true); },
+      async updateNamedSingleSelect(_client, input) {
+        updatedItemIds.push(input.itemId);
+        return status(input.itemId, true);
+      },
     },
   );
 
   assert.equal(adds, 1);
-  assert.equal(reads, 2);
+  assert.equal(reads, 1);
+  assert.deepEqual(updatedItemIds, ["PVTI_NEW"]);
   assert.equal(result.addedToProject, true);
   assert.equal(result.itemId, "PVTI_NEW");
   assert.equal(result.changed, true);
   assert.equal(result.verified, true);
   assert.equal(result.status.after?.name, "Backlog");
+});
+
+test("capture backlog fails closed when add mutation does not return a Project item ID", async () => {
+  const reader: CaptureBacklogWorkItemReader = {
+    async resolveProjectItem() { return resolution(false, null); },
+  };
+
+  await assert.rejects(
+    captureProjectBacklogItem(
+      {} as GitHubGraphQlClient,
+      reader,
+      {
+        owner: "gyuniverse-hq",
+        projectNumber: 2,
+        projectId: "PVT_PROJECT",
+        url: "https://github.com/gyuniverse-hq/bid-change-validator/issues/99",
+      },
+      {
+        async addItem() { return {}; },
+        async updateNamedSingleSelect(_client, input) { return status(input.itemId, true); },
+      },
+    ),
+    /did not return a Project item ID/,
+  );
 });
 
 test("capture backlog is no_change when item already exists in Backlog", async () => {

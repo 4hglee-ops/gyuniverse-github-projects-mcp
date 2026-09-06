@@ -56,6 +56,12 @@ export interface CaptureBacklogDependencies {
   updateNamedSingleSelect?: UpdateNamedSingleSelect;
 }
 
+function addedProjectItemId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
 export async function captureProjectBacklogItem(
   client: GitHubGraphQlClient,
   workItems: CaptureBacklogWorkItemReader,
@@ -80,23 +86,23 @@ export async function captureProjectBacklogItem(
       throw new Error("PROJECT_ITEM_LOOKUP_INCOMPLETE: Cannot safely capture because Project item lookup was not exhaustive.");
     }
 
-    await addItem(client, input.projectId, initial.resolvedContent.contentId);
+    const addedItem = await addItem(client, input.projectId, initial.resolvedContent.contentId);
+    itemId = addedProjectItemId(addedItem);
+    if (!itemId) {
+      throw new Error("MUTATION_VERIFICATION_FAILED: GitHub did not return a Project item ID after add.");
+    }
     addedToProject = true;
-
-    const verifiedMembership = await workItems.resolveProjectItem(input.owner, input.projectNumber, input.url);
-    if (!verifiedMembership.projectItem.found || !verifiedMembership.projectItem.item?.itemId) {
-      throw new Error("MUTATION_VERIFICATION_FAILED: Work item was not found in the Project after add.");
-    }
-    if (verifiedMembership.projectItem.project.id !== input.projectId) {
-      throw new Error("MUTATION_VERIFICATION_FAILED: Captured work item resolved to a different Project.");
-    }
-    itemId = verifiedMembership.projectItem.item.itemId;
   }
 
   if (!itemId) {
     throw new Error("PROJECT_ITEM_NOT_FOUND: Work item does not have a Project item ID.");
   }
 
+  // The addProjectV2ItemById mutation returns the authoritative Project item ID.
+  // Avoid an immediate list-based membership read here: GitHub's Project item list can
+  // briefly lag the successful mutation. The direct Status read/write path below
+  // re-reads this exact item by node ID and verifies its parent Project before any
+  // field mutation, so membership and final Backlog state are still fail-closed.
   const status = await updateNamedSingleSelect(client, {
     owner: input.owner,
     projectNumber: input.projectNumber,
