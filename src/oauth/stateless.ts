@@ -14,6 +14,8 @@ export interface RegisteredClientPayload {
   iat: number;
 }
 
+export type OAuthClientMode = "public_pkce" | "gpt_actions_confidential";
+
 export interface AuthorizationCodePayload {
   typ: "authorization_code";
   clientId: string;
@@ -22,6 +24,7 @@ export interface AuthorizationCodePayload {
   scope: string;
   sub: string;
   codeChallenge: string;
+  clientMode?: OAuthClientMode;
   iat: number;
   exp: number;
 }
@@ -41,6 +44,7 @@ export interface RefreshTokenPayload {
   scope: string;
   clientId: string;
   sub: string;
+  clientMode?: OAuthClientMode;
   iat: number;
   exp: number;
 }
@@ -66,6 +70,23 @@ export function canonicalMcpResource(): string {
 
 export function oauthTeamCode(): string | null {
   return env("MCP_OAUTH_TEAM_CODE");
+}
+
+export function gptActionsOauthClientId(): string | null {
+  return env("GPT_ACTIONS_OAUTH_CLIENT_ID");
+}
+
+export function gptActionsOauthClientSecret(): string | null {
+  return env("GPT_ACTIONS_OAUTH_CLIENT_SECRET");
+}
+
+export function gptActionsOauthConfigured(): boolean {
+  return Boolean(gptActionsOauthClientId() && gptActionsOauthClientSecret());
+}
+
+export function isGptActionsOauthClient(clientId: string): boolean {
+  const configured = gptActionsOauthClientId();
+  return Boolean(configured && clientId === configured);
 }
 
 function signingSecret(): string | null {
@@ -190,6 +211,12 @@ export function isAllowedRedirectUri(value: string): boolean {
       url.protocol === "https:" &&
       url.hostname === "chatgpt.com" &&
       /^\/connector\/oauth\/[^/]+$/.test(url.pathname)
+    ) return true;
+
+    if (
+      url.protocol === "https:" &&
+      (url.hostname === "chatgpt.com" || url.hostname === "chat.openai.com") &&
+      /^\/aip\/g-[^/]+\/oauth\/callback$/.test(url.pathname)
     ) return true;
 
     if (

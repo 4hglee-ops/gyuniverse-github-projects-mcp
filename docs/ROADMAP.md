@@ -152,9 +152,13 @@ Add a semantic REST/GPT Actions adapter that uses the same Shared Core as MCP.
 - [x] M9-4 Action-safe error envelope with `category / retryable / userAction`
 - [x] M9-4 Explicit no-auto-retry guidance for `CREATE_WORK_ITEM_PARTIAL_FAILURE`
 - [x] M9-4 Re-read-before-retry guidance for ambiguous verification failures
+- [x] M9-5 Add confidential OAuth client compatibility for Custom GPT Actions
+- [x] M9-5 Support ChatGPT `/aip/g-.../oauth/callback` redirect patterns while preserving Remote MCP callback rules
+- [x] M9-5 Add GPT Actions OAuth/live-validation runbook without storing client secrets
 
 ### Remaining
-- [ ] M9-5 Connect GPT Actions to `/openapi.json` with OAuth
+- [ ] Configure `GPT_ACTIONS_OAUTH_CLIENT_ID` / `GPT_ACTIONS_OAUTH_CLIENT_SECRET` in Production
+- [ ] Import `/openapi.json` into the Custom GPT editor and complete OAuth
 - [ ] M9-5 Validate read action with an individual identity
 - [ ] M9-5 Validate safe no-change write and actor audit metadata
 - [ ] M9-5 Validate permission denial behavior through GPT Actions

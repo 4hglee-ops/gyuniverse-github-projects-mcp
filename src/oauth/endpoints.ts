@@ -5,12 +5,16 @@ import {
   AUTH_CODE_TTL_SECONDS,
   AuthorizationCodePayload,
   canonicalMcpResource,
+  gptActionsOauthClientSecret,
+  gptActionsOauthConfigured,
   isAllowedRedirectUri,
+  isGptActionsOauthClient,
   normalizeScope,
   nowSeconds,
   oauthTeamCode,
   OAUTH_READ_SCOPE,
   OAUTH_WRITE_SCOPE,
+  type OAuthClientMode,
   publicBaseUrl,
   REFRESH_TOKEN_TTL_SECONDS,
   RefreshTokenPayload,
@@ -45,6 +49,11 @@ interface AuthorizationParams {
   scope: string;
 }
 
+interface TokenClientCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
 const LEGACY_TEAM_SUBJECT = "gyuniverse-projects-team";
 
 export const authorizationCodeReplayStore: OAuthReplayStore =
@@ -74,7 +83,9 @@ export function authorizationServerMetadata(): Record<string, unknown> {
     response_types_supported: ["code"],
     response_modes_supported: ["query"],
     grant_types_supported: ["authorization_code", "refresh_token"],
-    token_endpoint_auth_methods_supported: ["none"],
+    token_endpoint_auth_methods_supported: gptActionsOauthConfigured()
+      ? ["none", "client_secret_post", "client_secret_basic"]
+      : ["none"],
     code_challenge_methods_supported: ["S256"],
     authorization_response_iss_parameter_supported: true,
   };
@@ -109,7 +120,7 @@ export async function registerOAuthClient(request: Request): Promise<Response> {
 
   if (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== "none") {
     return noStoreJson(
-      { error: "invalid_client_metadata", error_description: "Only public PKCE clients are supported." },
+      { error: "invalid_client_metadata", error_description: "Dynamic registration supports public PKCE clients only." },
       { status: 400 },
     );
   }
@@ -160,6 +171,11 @@ function paramsFromUrl(url: URL): AuthorizationParams {
   };
 }
 
+function effectiveResource(params: AuthorizationParams): string {
+  if (params.resource) return params.resource;
+  return isGptActionsOauthClient(params.clientId) ? canonicalMcpResource() : "";
+}
+
 async function paramsFromForm(request: Request): Promise<{ params: AuthorizationParams; accessCode: string }> {
   const form = await request.formData();
   return {
@@ -177,16 +193,37 @@ async function paramsFromForm(request: Request): Promise<{ params: Authorization
   };
 }
 
-async function validateAuthorization(params: AuthorizationParams): Promise<string | null> {
-  if (params.responseType !== "code") return "Only response_type=code is supported.";
-  if (!params.clientId || !params.redirectUri || !params.codeChallenge) return "Missing required OAuth parameters.";
-  if (params.codeChallengeMethod !== "S256") return "PKCE S256 is required.";
-  if (params.resource !== canonicalMcpResource()) return "Invalid resource parameter.";
-  if (!scopeIsAllowed(params.scope)) return "Unsupported or disabled scope.";
+async function authorizationClientMode(params: AuthorizationParams): Promise<OAuthClientMode | null> {
+  if (isGptActionsOauthClient(params.clientId)) {
+    if (!isAllowedRedirectUri(params.redirectUri)) return null;
+    return "gpt_actions_confidential";
+  }
 
   const client = await verifyEnvelope<RegisteredClientPayload>(params.clientId, "gyprc");
-  if (!client || client.typ !== "registered_client") return "Invalid client_id.";
-  if (!client.redirectUris.includes(params.redirectUri)) return "redirect_uri was not registered for this client.";
+  if (!client || client.typ !== "registered_client") return null;
+  if (!client.redirectUris.includes(params.redirectUri)) return null;
+  return "public_pkce";
+}
+
+async function validateAuthorization(params: AuthorizationParams): Promise<string | null> {
+  if (params.responseType !== "code") return "Only response_type=code is supported.";
+  if (!params.clientId || !params.redirectUri) return "Missing required OAuth parameters.";
+  if (!scopeIsAllowed(params.scope)) return "Unsupported or disabled scope.";
+
+  const mode = await authorizationClientMode(params);
+  if (!mode) return "Invalid client_id or redirect_uri.";
+
+  const resource = effectiveResource(params);
+  if (resource !== canonicalMcpResource()) return "Invalid resource parameter.";
+
+  if (mode === "gpt_actions_confidential") {
+    if (!params.state) return "state is required for GPT Actions OAuth.";
+    if (params.codeChallenge && params.codeChallengeMethod !== "S256") return "PKCE must use S256 when supplied.";
+    return null;
+  }
+
+  if (!params.codeChallenge) return "Missing required OAuth parameters.";
+  if (params.codeChallengeMethod !== "S256") return "PKCE S256 is required.";
   return null;
 }
 
@@ -207,7 +244,7 @@ function approvalPage(params: AuthorizationParams, error?: string): Response {
     ["state", params.state],
     ["code_challenge", params.codeChallenge],
     ["code_challenge_method", params.codeChallengeMethod],
-    ["resource", params.resource],
+    ["resource", effectiveResource(params)],
     ["scope", params.scope],
   ]
     .map(([name, value]) => `<input type="hidden" name="${name}" value="${escapeHtml(value)}">`)
@@ -229,7 +266,7 @@ function approvalPage(params: AuthorizationParams, error?: string): Response {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
-        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://claude.ai https://claude.com https://chatgpt.com; base-uri 'none'; frame-ancestors 'none'",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://claude.ai https://claude.com https://chatgpt.com https://chat.openai.com; base-uri 'none'; frame-ancestors 'none'",
       },
     },
   );
@@ -269,15 +306,19 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
     return approvalPage(parsed.params, "접근 코드가 올바르지 않습니다.");
   }
 
+  const clientMode = await authorizationClientMode(parsed.params);
+  if (!clientMode) return new Response("Invalid OAuth client.", { status: 400 });
+
   const now = nowSeconds();
   const payload: AuthorizationCodePayload = {
     typ: "authorization_code",
     clientId: parsed.params.clientId,
     redirectUri: parsed.params.redirectUri,
-    resource: parsed.params.resource,
+    resource: effectiveResource(parsed.params),
     scope: parsed.params.scope,
     sub: subject,
     codeChallenge: parsed.params.codeChallenge,
+    clientMode,
     iat: now,
     exp: now + AUTH_CODE_TTL_SECONDS,
   };
@@ -289,7 +330,48 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
   return Response.redirect(redirect.toString(), 303);
 }
 
-async function issueTokens(resource: string, scope: string, clientId: string, subject: string): Promise<Response> {
+function basicClientCredentials(request: Request): TokenClientCredentials | null {
+  const header = request.headers.get("authorization")?.trim();
+  if (!header?.startsWith("Basic ")) return null;
+  try {
+    const decoded = atob(header.slice("Basic ".length).trim());
+    const separator = decoded.indexOf(":");
+    if (separator < 0) return null;
+    return {
+      clientId: decodeURIComponent(decoded.slice(0, separator)),
+      clientSecret: decodeURIComponent(decoded.slice(separator + 1)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function tokenClientCredentials(request: Request, form: FormData): TokenClientCredentials {
+  const basic = basicClientCredentials(request);
+  if (basic) return basic;
+  return {
+    clientId: String(form.get("client_id") ?? ""),
+    clientSecret: String(form.get("client_secret") ?? ""),
+  };
+}
+
+function verifyConfidentialClient(credentials: TokenClientCredentials): boolean {
+  const expected = gptActionsOauthClientSecret();
+  return Boolean(
+    expected &&
+    isGptActionsOauthClient(credentials.clientId) &&
+    credentials.clientSecret &&
+    credentials.clientSecret === expected,
+  );
+}
+
+async function issueTokens(
+  resource: string,
+  scope: string,
+  clientId: string,
+  subject: string,
+  clientMode: OAuthClientMode,
+): Promise<Response> {
   const now = nowSeconds();
   const accessPayload: AccessTokenPayload = {
     typ: "access_token",
@@ -305,6 +387,7 @@ async function issueTokens(resource: string, scope: string, clientId: string, su
     scope,
     clientId,
     sub: subject,
+    clientMode,
     iat: now,
     exp: now + REFRESH_TOKEN_TTL_SECONDS,
   };
@@ -321,52 +404,80 @@ async function issueTokens(resource: string, scope: string, clientId: string, su
   });
 }
 
-async function handleAuthorizationCode(form: FormData): Promise<Response> {
+async function handleAuthorizationCode(request: Request, form: FormData): Promise<Response> {
   const code = String(form.get("code") ?? "");
-  const clientId = String(form.get("client_id") ?? "");
+  const credentials = tokenClientCredentials(request, form);
   const redirectUri = String(form.get("redirect_uri") ?? "");
   const codeVerifier = String(form.get("code_verifier") ?? "");
-  const resource = String(form.get("resource") ?? "");
+  const requestedResource = String(form.get("resource") ?? "");
 
-  if (!code || !clientId || !redirectUri || !codeVerifier || !resource) {
+  if (!code || !credentials.clientId || !redirectUri) {
     return tokenError("invalid_request", "Missing required token request parameters.");
   }
-  if (resource !== canonicalMcpResource()) return tokenError("invalid_target", "Unexpected resource parameter.");
 
   const payload = await verifyEnvelope<AuthorizationCodePayload>(code, "gypac");
   if (!payload || payload.typ !== "authorization_code") return tokenError("invalid_grant", "Authorization code is invalid.");
   if (payload.exp <= nowSeconds()) return tokenError("invalid_grant", "Authorization code expired.");
-  if (payload.clientId !== clientId) return tokenError("invalid_grant", "client_id mismatch.");
+  if (payload.clientId !== credentials.clientId) return tokenError("invalid_grant", "client_id mismatch.");
   if (payload.redirectUri !== redirectUri) return tokenError("invalid_grant", "redirect_uri mismatch.");
-  if (payload.resource !== resource) return tokenError("invalid_grant", "resource mismatch.");
   if (!payload.sub) return tokenError("invalid_grant", "Authorization code subject is missing.");
 
-  const actualChallenge = await sha256Base64Url(codeVerifier);
-  if (actualChallenge !== payload.codeChallenge) return tokenError("invalid_grant", "PKCE verification failed.");
+  const mode = payload.clientMode ?? "public_pkce";
+  const resource = requestedResource || (mode === "gpt_actions_confidential" ? canonicalMcpResource() : "");
+  if (!resource) return tokenError("invalid_request", "Missing resource parameter.");
+  if (payload.resource !== resource || resource !== canonicalMcpResource()) {
+    return tokenError("invalid_target", "Unexpected resource parameter.");
+  }
+
+  if (mode === "gpt_actions_confidential") {
+    if (!verifyConfidentialClient(credentials)) return tokenError("invalid_client", "Client authentication failed.", 401);
+    if (payload.codeChallenge) {
+      if (!codeVerifier) return tokenError("invalid_request", "code_verifier is required for this authorization code.");
+      const actualChallenge = await sha256Base64Url(codeVerifier);
+      if (actualChallenge !== payload.codeChallenge) return tokenError("invalid_grant", "PKCE verification failed.");
+    }
+  } else {
+    if (credentials.clientSecret) return tokenError("invalid_client", "Public PKCE clients must not use a client secret.", 401);
+    if (!codeVerifier) return tokenError("invalid_request", "Missing code_verifier.");
+    const actualChallenge = await sha256Base64Url(codeVerifier);
+    if (actualChallenge !== payload.codeChallenge) return tokenError("invalid_grant", "PKCE verification failed.");
+  }
+
   if (!(await authorizationCodeReplayStore.consume(code, payload.exp))) {
     return tokenError("invalid_grant", "Authorization code has already been used.");
   }
 
-  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub);
+  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub, mode);
 }
 
-async function handleRefreshToken(form: FormData): Promise<Response> {
+async function handleRefreshToken(request: Request, form: FormData): Promise<Response> {
   const refreshToken = String(form.get("refresh_token") ?? "");
-  const clientId = String(form.get("client_id") ?? "");
-  const resource = String(form.get("resource") ?? "");
+  const credentials = tokenClientCredentials(request, form);
+  const requestedResource = String(form.get("resource") ?? "");
 
-  if (!refreshToken || !clientId || !resource) return tokenError("invalid_request", "Missing refresh token request parameters.");
-  if (resource !== canonicalMcpResource()) return tokenError("invalid_target", "Unexpected resource parameter.");
+  if (!refreshToken || !credentials.clientId) return tokenError("invalid_request", "Missing refresh token request parameters.");
 
   const payload = await verifyEnvelope<RefreshTokenPayload>(refreshToken, "gyprf");
   if (!payload || payload.typ !== "refresh_token") return tokenError("invalid_grant", "Refresh token is invalid.");
   if (payload.exp <= nowSeconds()) return tokenError("invalid_grant", "Refresh token expired.");
-  if (payload.clientId !== clientId) return tokenError("invalid_grant", "client_id mismatch.");
-  if (payload.aud !== resource) return tokenError("invalid_grant", "resource mismatch.");
+  if (payload.clientId !== credentials.clientId) return tokenError("invalid_grant", "client_id mismatch.");
   if (!payload.sub) return tokenError("invalid_grant", "Refresh token subject is missing.");
   if (!scopeIsAllowed(payload.scope)) return tokenError("invalid_scope", "Token scope is no longer enabled.");
 
-  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub);
+  const mode = payload.clientMode ?? "public_pkce";
+  const resource = requestedResource || (mode === "gpt_actions_confidential" ? canonicalMcpResource() : "");
+  if (!resource) return tokenError("invalid_request", "Missing resource parameter.");
+  if (payload.aud !== resource || resource !== canonicalMcpResource()) {
+    return tokenError("invalid_target", "Unexpected resource parameter.");
+  }
+
+  if (mode === "gpt_actions_confidential") {
+    if (!verifyConfidentialClient(credentials)) return tokenError("invalid_client", "Client authentication failed.", 401);
+  } else if (credentials.clientSecret) {
+    return tokenError("invalid_client", "Public PKCE clients must not use a client secret.", 401);
+  }
+
+  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub, mode);
 }
 
 export async function tokenOAuth(request: Request): Promise<Response> {
@@ -378,7 +489,7 @@ export async function tokenOAuth(request: Request): Promise<Response> {
     return tokenError("invalid_request", "Expected application/x-www-form-urlencoded body.");
   }
   const grantType = String(form.get("grant_type") ?? "");
-  if (grantType === "authorization_code") return handleAuthorizationCode(form);
-  if (grantType === "refresh_token") return handleRefreshToken(form);
+  if (grantType === "authorization_code") return handleAuthorizationCode(request, form);
+  if (grantType === "refresh_token") return handleRefreshToken(request, form);
   return tokenError("unsupported_grant_type", "Supported grants: authorization_code, refresh_token.");
 }

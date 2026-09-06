@@ -10,6 +10,7 @@ import {
 } from "./endpoints.js";
 import {
   canonicalMcpResource,
+  isAllowedRedirectUri,
   OAUTH_READ_SCOPE,
   OAUTH_WRITE_SCOPE,
   sha256Base64Url,
@@ -39,6 +40,8 @@ test("protected resource metadata is read-only by default", async () => {
     {
       PUBLIC_BASE_URL: "https://projects.example.test",
       MCP_OAUTH_WRITE_ENABLED: undefined,
+      GPT_ACTIONS_OAUTH_CLIENT_ID: undefined,
+      GPT_ACTIONS_OAUTH_CLIENT_SECRET: undefined,
     },
     () => {
       assert.deepEqual(protectedResourceMetadata(), {
@@ -47,8 +50,12 @@ test("protected resource metadata is read-only by default", async () => {
         scopes_supported: [OAUTH_READ_SCOPE],
         bearer_methods_supported: ["header"],
       });
-      const server = authorizationServerMetadata() as { scopes_supported: string[] };
+      const server = authorizationServerMetadata() as {
+        scopes_supported: string[];
+        token_endpoint_auth_methods_supported: string[];
+      };
       assert.deepEqual(server.scopes_supported, [OAUTH_READ_SCOPE]);
+      assert.deepEqual(server.token_endpoint_auth_methods_supported, ["none"]);
     },
   );
 });
@@ -64,6 +71,28 @@ test("write scope is advertised only when explicitly enabled", async () => {
       assert.deepEqual(resource.scopes_supported, [OAUTH_READ_SCOPE, OAUTH_WRITE_SCOPE]);
     },
   );
+});
+
+test("GPT Actions OAuth configuration advertises confidential token auth methods", async () => {
+  await withEnv(
+    {
+      GPT_ACTIONS_OAUTH_CLIENT_ID: "gpt-actions-client",
+      GPT_ACTIONS_OAUTH_CLIENT_SECRET: "gpt-actions-secret",
+    },
+    () => {
+      const server = authorizationServerMetadata() as { token_endpoint_auth_methods_supported: string[] };
+      assert.deepEqual(
+        server.token_endpoint_auth_methods_supported,
+        ["none", "client_secret_post", "client_secret_basic"],
+      );
+    },
+  );
+});
+
+test("GPT Actions callback patterns are accepted and arbitrary redirects are rejected", () => {
+  assert.equal(isAllowedRedirectUri("https://chatgpt.com/aip/g-test123/oauth/callback"), true);
+  assert.equal(isAllowedRedirectUri("https://chat.openai.com/aip/g-test123/oauth/callback"), true);
+  assert.equal(isAllowedRedirectUri("https://evil.example/aip/g-test123/oauth/callback"), false);
 });
 
 test("dynamic client registration accepts ChatGPT callback and rejects arbitrary redirects", async () => {
@@ -111,6 +140,7 @@ test("authorization code token exchange preserves individual subject and rejects
         scope: OAUTH_READ_SCOPE,
         sub: "user:test",
         codeChallenge: challenge,
+        clientMode: "public_pkce",
         iat: now,
         exp: now + 120,
       } satisfies AuthorizationCodePayload);
@@ -146,6 +176,97 @@ test("authorization code token exchange preserves individual subject and rejects
       assert.equal(replayBody.error, "invalid_grant");
 
       assert.ok(authorizationCodeReplayStore);
+    },
+  );
+});
+
+test("GPT Actions confidential client exchanges authorization code without PKCE resource parameter", async () => {
+  await withEnv(
+    {
+      PUBLIC_BASE_URL: "https://projects.example.test",
+      MCP_OAUTH_SIGNING_SECRET: "test-signing-secret",
+      MCP_OAUTH_WRITE_ENABLED: "true",
+      GPT_ACTIONS_OAUTH_CLIENT_ID: "gpt-actions-client",
+      GPT_ACTIONS_OAUTH_CLIENT_SECRET: "gpt-actions-secret",
+    },
+    async () => {
+      const now = nowSeconds();
+      const redirectUri = "https://chatgpt.com/aip/g-test123/oauth/callback";
+      const code = await signEnvelope("gypac", {
+        typ: "authorization_code",
+        clientId: "gpt-actions-client",
+        redirectUri,
+        resource: canonicalMcpResource(),
+        scope: `${OAUTH_READ_SCOPE} ${OAUTH_WRITE_SCOPE}`,
+        sub: "user:admin-validation",
+        codeChallenge: "",
+        clientMode: "gpt_actions_confidential",
+        iat: now,
+        exp: now + 120,
+      } satisfies AuthorizationCodePayload);
+
+      const response = await tokenOAuth(new Request("https://projects.example.test/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: "gpt-actions-client",
+          client_secret: "gpt-actions-secret",
+          redirect_uri: redirectUri,
+        }),
+      }));
+
+      assert.equal(response.status, 200);
+      const token = await response.json() as { access_token: string; refresh_token: string; scope: string };
+      assert.match(token.access_token, /^gypa\./);
+      assert.match(token.refresh_token, /^gyprf\./);
+      assert.equal(token.scope, `${OAUTH_READ_SCOPE} ${OAUTH_WRITE_SCOPE}`);
+      const payload = await oauthAccessTokenPayload(token.access_token);
+      assert.equal(payload?.sub, "user:admin-validation");
+    },
+  );
+});
+
+test("GPT Actions confidential client rejects wrong secret", async () => {
+  await withEnv(
+    {
+      PUBLIC_BASE_URL: "https://projects.example.test",
+      MCP_OAUTH_SIGNING_SECRET: "test-signing-secret",
+      GPT_ACTIONS_OAUTH_CLIENT_ID: "gpt-actions-client",
+      GPT_ACTIONS_OAUTH_CLIENT_SECRET: "gpt-actions-secret",
+    },
+    async () => {
+      const now = nowSeconds();
+      const redirectUri = "https://chatgpt.com/aip/g-test456/oauth/callback";
+      const code = await signEnvelope("gypac", {
+        typ: "authorization_code",
+        clientId: "gpt-actions-client",
+        redirectUri,
+        resource: canonicalMcpResource(),
+        scope: OAUTH_READ_SCOPE,
+        sub: "user:admin-validation",
+        codeChallenge: "",
+        clientMode: "gpt_actions_confidential",
+        iat: now,
+        exp: now + 120,
+      } satisfies AuthorizationCodePayload);
+
+      const response = await tokenOAuth(new Request("https://projects.example.test/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: "gpt-actions-client",
+          client_secret: "wrong-secret",
+          redirect_uri: redirectUri,
+        }),
+      }));
+
+      assert.equal(response.status, 401);
+      const payload = await response.json() as { error: string };
+      assert.equal(payload.error, "invalid_client");
     },
   );
 });
