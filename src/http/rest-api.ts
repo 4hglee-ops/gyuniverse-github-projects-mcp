@@ -7,6 +7,7 @@ import { createM10GovernanceServices } from "../core/governance/m10-services.js"
 import { IdentityContextService } from "../core/identity/identity-context-service.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
+import { AuthorizedProjectItemReferenceResolver } from "../core/projects/project-item-reference-resolver.js";
 import { ProjectService } from "../core/projects/project-service.js";
 import { HighLevelReadService } from "../core/reads/high-level-read-service.js";
 import { SnapshotService } from "../core/snapshots/snapshot-service.js";
@@ -42,23 +43,36 @@ const createInput = z.object({
   title: z.string().min(1),
   body: z.string().nullable().optional(),
 });
+const optionalOwner = z.string().trim().min(1).max(100).optional();
 const relationshipReadInput = z.object({
-  owner: z.string().min(1).max(100),
+  owner: optionalOwner,
   number: z.number().int().positive(),
-  itemId: z.string().min(1).max(256),
+  itemId: z.string().trim().min(1).max(256).optional(),
+  url: z.string().trim().url().max(2048).optional(),
+  repository: z.string().trim().min(1).max(201).optional(),
+  itemNumber: z.number().int().positive().optional(),
   first: z.number().int().min(1).max(100).default(50),
 }).strict();
 const relationshipWriteInput = z.object({
-  owner: z.string().min(1).max(100),
+  owner: optionalOwner,
   number: z.number().int().positive(),
-  sourceItemId: z.string().min(1).max(256),
-  targetItemId: z.string().min(1).max(256),
+  sourceItemId: z.string().trim().min(1).max(256).optional(),
+  sourceUrl: z.string().trim().url().max(2048).optional(),
+  sourceRepository: z.string().trim().min(1).max(201).optional(),
+  sourceNumber: z.number().int().positive().optional(),
+  targetItemId: z.string().trim().min(1).max(256).optional(),
+  targetUrl: z.string().trim().url().max(2048).optional(),
+  targetRepository: z.string().trim().min(1).max(201).optional(),
+  targetNumber: z.number().int().positive().optional(),
 }).strict();
 const bulkPreviewInput = z.object({
-  owner: z.string().min(1).max(100),
+  owner: optionalOwner,
   number: z.number().int().positive(),
   operations: z.array(z.object({
-    itemId: z.string().min(1).max(256),
+    itemId: z.string().trim().min(1).max(256).optional(),
+    url: z.string().trim().url().max(2048).optional(),
+    repository: z.string().trim().min(1).max(201).optional(),
+    number: z.number().int().positive().optional(),
     field: z.enum(["Status", "Priority"]),
     value: z.string().min(1).max(256),
   }).strict()).min(1).max(20),
@@ -116,7 +130,7 @@ export function actionErrorAdvice(code: string): ActionErrorAdvice {
   if (["PERMISSION_DENIED", "CAPABILITY_REQUIRED", "IDENTITY_REQUIRED", "PROJECT_MEMBERSHIP_DENIED", "PROJECT_WRITE_NOT_ALLOWED"].includes(code)) {
     return { category: "authorization", retryable: false, userAction: "Use an identity that has permission for this Project and operation, or ask an Admin/PM to perform it." };
   }
-  if (["INVALID_INPUT", "INVALID_JSON", "IDENTITY_GITHUB_LOGIN_REQUIRED"].includes(code)) {
+  if (["INVALID_INPUT", "INVALID_JSON", "IDENTITY_GITHUB_LOGIN_REQUIRED", "PROJECT_ITEM_REFERENCE_INVALID", "PROJECT_OWNER_REQUIRED"].includes(code)) {
     return { category: "validation", retryable: false, userAction: "Correct the request input or identity mapping, then retry." };
   }
   if (code === "CREATE_WORK_ITEM_PARTIAL_FAILURE") {
@@ -128,7 +142,7 @@ export function actionErrorAdvice(code: string): ActionErrorAdvice {
   if (code === "MUTATION_VERIFICATION_FAILED") {
     return { category: "conflict", retryable: false, userAction: "Re-read the affected Project item before retrying; the mutation result could be ambiguous." };
   }
-  if (["REPOSITORY_NOT_FOUND", "PROJECT_ITEM_NOT_FOUND", "PROJECT_ITEM_LOOKUP_INCOMPLETE"].includes(code)) {
+  if (["REPOSITORY_NOT_FOUND", "PROJECT_ITEM_NOT_FOUND", "PROJECT_ITEM_LOOKUP_INCOMPLETE", "PROJECT_ITEM_REFERENCE_AMBIGUOUS"].includes(code)) {
     return { category: "request", retryable: false, userAction: "Verify the repository, Project item, or URL target and retry with a valid resource." };
   }
   return { category: "upstream", retryable: true, userAction: "Retry once after re-reading current Project state. If it repeats, surface the error instead of looping." };
@@ -212,6 +226,7 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
     audit: auditService,
     bulkStore: options.bulkStore,
   });
+  const itemReferences = new AuthorizedProjectItemReferenceResolver({ config, client, projects });
 
   try {
     if (url.pathname === "/api/v1/identity") {
@@ -250,7 +265,12 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
     }
     if (url.pathname === "/api/v1/project/item-relationships") {
       const input = relationshipReadInput.parse(body);
-      return json({ ok: true, data: await governance.relationships.getRelationships(input) });
+      const resolution = await itemReferences.resolveMany(input.owner, input.number, [{
+        itemId: input.itemId, url: input.url, repository: input.repository, number: input.itemNumber,
+      }]);
+      return json({ ok: true, data: await governance.relationships.getRelationships({
+        owner: resolution.owner, number: input.number, itemId: resolution.items[0]!.itemId, first: input.first,
+      }) });
     }
     if (url.pathname === "/api/v1/project/bulk-plan") {
       const input = bulkPlanGetInput.parse(body);
@@ -290,11 +310,25 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
     const relationshipOperation = relationshipOperations[url.pathname as keyof typeof relationshipOperations];
     if (relationshipOperation) {
       const input = relationshipWriteInput.parse(body);
-      return json({ ok: true, data: await governance.relationshipWrites.execute(relationshipOperation, input) });
+      const resolution = await itemReferences.resolveMany(input.owner, input.number, [{
+        itemId: input.sourceItemId, url: input.sourceUrl, repository: input.sourceRepository, number: input.sourceNumber,
+      }, {
+        itemId: input.targetItemId, url: input.targetUrl, repository: input.targetRepository, number: input.targetNumber,
+      }]);
+      return json({ ok: true, data: await governance.relationshipWrites.execute(relationshipOperation, {
+        owner: resolution.owner, number: input.number,
+        sourceItemId: resolution.items[0]!.itemId, targetItemId: resolution.items[1]!.itemId,
+      }) });
     }
     if (url.pathname === "/api/v1/write/bulk/preview") {
       const input = bulkPreviewInput.parse(body);
-      return json({ ok: true, data: await governance.bulk.preview(input.owner, input.number, input.operations) });
+      const resolution = await itemReferences.resolveMany(input.owner, input.number, input.operations.map((operation) => ({
+        itemId: operation.itemId, url: operation.url, repository: operation.repository, number: operation.number,
+      })));
+      const operations = input.operations.map((operation, index) => ({
+        itemId: resolution.items[index]!.itemId, field: operation.field, value: operation.value,
+      }));
+      return json({ ok: true, data: await governance.bulk.preview(resolution.owner, input.number, operations) });
     }
     if (url.pathname === "/api/v1/write/bulk/approve") {
       const input = bulkPlanReferenceInput.parse(body);

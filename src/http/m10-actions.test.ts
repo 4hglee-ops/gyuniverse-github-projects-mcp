@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { AuditService } from "../core/audit/audit-service.js";
 import { MemoryWriteAuditStore } from "../core/audit/audit-store.js";
+import type { BulkPlan } from "../core/bulk/bulk-plan.js";
 import { MemoryBulkPlanStore } from "../core/bulk/bulk-plan-store.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
@@ -29,6 +30,7 @@ class ActionsClient extends GitHubGraphQlClient {
   mutations = 0;
   subIssue = true;
   blockedBy = false;
+  projectLogins: string[] = [];
 
   override async request<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
     if (query.includes("mutation GuardedIssueRelationship")) {
@@ -43,10 +45,16 @@ class ActionsClient extends GitHubGraphQlClient {
       this.mutations++;
       throw new Error("Unexpected non-relationship mutation in Actions regression test.");
     }
+    if (query.includes("ProjectItemReferenceInventory")) {
+      return { node: { __typename: "ProjectV2", id: "PVT", items: { nodes: [
+        { id: "ITEM1", type: "ISSUE", content: { __typename: "Issue", id: "I1", title: "Source", number: 8, url: "https://github.com/gyuniverse-hq/repo/issues/8", repository: { nameWithOwner: "gyuniverse-hq/repo" } } },
+        { id: "ITEM2", type: "ISSUE", content: { __typename: "Issue", id: "I2", title: "Target", number: 9, url: "https://github.com/gyuniverse-hq/repo/issues/9", repository: { nameWithOwner: "gyuniverse-hq/repo" } } },
+      ], pageInfo: { hasNextPage: false, endCursor: null } } } } as T;
+    }
     if (query.includes("RelationshipProjectItems")) {
       return { node: { __typename: "ProjectV2", id: "PVT", items: { nodes: [
-        { id: "ITEM1", content: { __typename: "Issue", id: "I1", title: "Source", number: 1, state: "OPEN", url: "https://github.com/gyuniverse-hq/repo/issues/1", repository: { nameWithOwner: "gyuniverse-hq/repo" } } },
-        { id: "ITEM2", content: { __typename: "Issue", id: "I2", title: "Target", number: 2, state: "OPEN", url: "https://github.com/gyuniverse-hq/repo/issues/2", repository: { nameWithOwner: "gyuniverse-hq/repo" } } },
+        { id: "ITEM1", content: { __typename: "Issue", id: "I1", title: "Source", number: 8, state: "OPEN", url: "https://github.com/gyuniverse-hq/repo/issues/8", repository: { nameWithOwner: "gyuniverse-hq/repo" } } },
+        { id: "ITEM2", content: { __typename: "Issue", id: "I2", title: "Target", number: 9, state: "OPEN", url: "https://github.com/gyuniverse-hq/repo/issues/9", repository: { nameWithOwner: "gyuniverse-hq/repo" } } },
       ], pageInfo: { hasNextPage: false, endCursor: null } } } } as T;
     }
     if (query.includes("IssueRelationships")) {
@@ -82,11 +90,20 @@ class ActionsClient extends GitHubGraphQlClient {
         options: [{ id: "OPT_TODO", name: "Todo" }],
       }] } } } } as T;
     }
+    if (typeof variables.login === "string") this.projectLogins.push(variables.login);
     return { repositoryOwner: { projectV2: {
       id: "PVT", number: 2, title: "Actions test", shortDescription: null, readme: null,
       url: "https://github.com/orgs/gyuniverse-hq/projects/2", closed: false, public: false,
       createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
     } } } as T;
+  }
+}
+
+class CountingBulkPlanStore extends MemoryBulkPlanStore {
+  creates = 0;
+  override async create(plan: BulkPlan): Promise<void> {
+    this.creates++;
+    await super.create(plan);
   }
 }
 
@@ -97,13 +114,14 @@ test("GPT Actions M10 routes reuse runtime Viewer/Member/Admin ACL and durable a
   process.env.MCP_OAUTH_SIGNING_SECRET = "test-signing-secret-never-log";
   const client = new ActionsClient(config.githubToken);
   const audit = new AuditService(200, new MemoryWriteAuditStore(200));
-  const bulkStore = new MemoryBulkPlanStore();
+  const bulkStore = new CountingBulkPlanStore();
 
   const call = async (
     role: "viewer" | "member" | "admin",
     path: string,
     body: object,
     scope = "projects:read projects:write",
+    runtimeConfig = config,
   ) => {
     const now = Math.floor(Date.now() / 1000);
     const token = await signEnvelope("gypa", {
@@ -114,7 +132,7 @@ test("GPT Actions M10 routes reuse runtime Viewer/Member/Admin ACL and durable a
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
-    }), { config, client, identityRegistry: registry, auditService: audit, bulkStore });
+    }), { config: runtimeConfig, client, identityRegistry: registry, auditService: audit, bulkStore });
   };
 
   try {
@@ -125,26 +143,40 @@ test("GPT Actions M10 routes reuse runtime Viewer/Member/Admin ACL and durable a
     assert.equal(viewerRead.status, 200);
     assert.equal((await viewerRead.json() as { data: { source: { itemId: string } } }).data.source.itemId, "ITEM1");
 
+    const friendlyViewerRead = await call("viewer", "/api/v1/project/item-relationships", {
+      number: 2, itemNumber: 8,
+    }, "projects:read");
+    assert.equal(friendlyViewerRead.status, 200);
+    assert.equal((await friendlyViewerRead.json() as { data: { source: { itemId: string } } }).data.source.itemId, "ITEM1");
+
+    const ownerRequired = await call("viewer", "/api/v1/project/item-relationships", {
+      number: 2, itemNumber: 8,
+    }, "projects:read", { ...config, allowedOwners: ["gyuniverse-hq", "another-owner"] });
+    assert.equal(ownerRequired.status, 400);
+    assert.equal((await ownerRequired.json() as { error: { code: string } }).error.code, "PROJECT_OWNER_REQUIRED");
+
     const scopeDenied = await call("admin", "/api/v1/write/relationship/add-sub-issue", relationshipInput, "projects:read");
     assert.equal(scopeDenied.status, 403);
     assert.equal((await scopeDenied.json() as { error: { code: string } }).error.code, "OAUTH_WRITE_SCOPE_REQUIRED");
 
     for (const role of ["viewer", "member"] as const) {
-      const denied = await call(role, "/api/v1/write/relationship/add-sub-issue", relationshipInput);
+      const denied = await call(role, "/api/v1/write/relationship/add-sub-issue", {
+        owner: "gyuniverse-hq", number: 2, sourceNumber: 8, targetNumber: 9,
+      });
       assert.equal(denied.status, 403);
       assert.equal((await denied.json() as { error: { code: string } }).error.code, "PERMISSION_DENIED");
     }
 
     const relationshipRoutes = [
-      ["/api/v1/write/relationship/add-sub-issue", "add_sub_issue", "no_change"],
-      ["/api/v1/write/relationship/remove-sub-issue", "remove_sub_issue", "success"],
-      ["/api/v1/write/relationship/add-blocked-by", "add_blocked_by", "success"],
-      ["/api/v1/write/relationship/remove-blocked-by", "remove_blocked_by", "success"],
+      ["/api/v1/write/relationship/add-sub-issue", "add_sub_issue", "no_change", { owner: "gyuniverse-hq", number: 2, sourceNumber: 8, targetNumber: 9 }],
+      ["/api/v1/write/relationship/remove-sub-issue", "remove_sub_issue", "success", { owner: "gyuniverse-hq", number: 2, sourceUrl: "https://github.com/gyuniverse-hq/repo/issues/8", targetRepository: "gyuniverse-hq/repo", targetNumber: 9 }],
+      ["/api/v1/write/relationship/add-blocked-by", "add_blocked_by", "success", { owner: "gyuniverse-hq", number: 2, sourceRepository: "gyuniverse-hq/repo", sourceNumber: 8, targetUrl: "https://github.com/gyuniverse-hq/repo/issues/9" }],
+      ["/api/v1/write/relationship/remove-blocked-by", "remove_blocked_by", "success", { owner: "gyuniverse-hq", number: 2, sourceNumber: 8, targetNumber: 9 }],
     ] as const;
     type RelationshipActionResult = { operation: string; outcome: string; actorId: string; auditPersistence: string };
     let relationshipData: RelationshipActionResult | null = null;
-    for (const [path, expectedOperation, expectedOutcome] of relationshipRoutes) {
-      const relationship = await call("admin", path, relationshipInput);
+    for (const [path, expectedOperation, expectedOutcome, friendlyInput] of relationshipRoutes) {
+      const relationship = await call("admin", path, friendlyInput);
       assert.equal(relationship.status, 200, path);
       relationshipData = (await relationship.json() as { data: RelationshipActionResult }).data;
       assert.equal(relationshipData?.operation, expectedOperation);
@@ -159,8 +191,21 @@ test("GPT Actions M10 routes reuse runtime Viewer/Member/Admin ACL and durable a
     assert.equal(memberBulk.status, 403);
     assert.equal((await memberBulk.json() as { error: { code: string } }).error.code, "PERMISSION_DENIED");
 
+    const createsBeforeFailure = bulkStore.creates;
+    const mutationsBeforeFailure = client.mutations;
+    const failedResolution = await call("admin", "/api/v1/write/bulk/preview", {
+      owner: "gyuniverse-hq", number: 2, operations: [{ number: 404, field: "Status", value: "Todo" }],
+    });
+    assert.equal(failedResolution.status, 400);
+    assert.equal((await failedResolution.json() as { error: { code: string } }).error.code, "PROJECT_ITEM_NOT_FOUND");
+    assert.equal(bulkStore.creates, createsBeforeFailure);
+    assert.equal(client.mutations, mutationsBeforeFailure);
+
     const preview = await call("admin", "/api/v1/write/bulk/preview", {
-      owner: "gyuniverse-hq", number: 2, operations: [{ itemId: "ITEM1", field: "Status", value: "Todo" }],
+      owner: "gyuniverse-hq", number: 2, operations: [
+        { number: 8, field: "Status", value: "Todo" },
+        { number: 9, field: "Status", value: "Todo" },
+      ],
     });
     assert.equal(preview.status, 200);
     const plan = (await preview.json() as { data: { planId: string; planDigest: string; state: string } }).data;
@@ -179,10 +224,14 @@ test("GPT Actions M10 routes reuse runtime Viewer/Member/Admin ACL and durable a
     assert.equal((await get.json() as { data: { state: string } }).data.state, "completed");
 
     const entries = (await audit.list()).entries;
-    assert.equal(entries.length, 5);
+    assert.equal(entries.length, 6);
     assert.equal(entries.some((entry) => entry.capability === "item.relationship.write"), true);
     assert.equal(entries.some((entry) => entry.capability === "item.update_status" && entry.planId === plan.planId), true);
+    assert.equal(entries.some((entry) => entry.itemId === "ITEM1"), true);
+    assert.equal(entries.some((entry) => entry.itemId === "ITEM2"), true);
     assert.equal(client.mutations, 3);
+    assert.equal(client.projectLogins.includes("4hglee-ops"), false);
+    assert.equal(client.projectLogins.every((login) => login === "gyuniverse-hq"), true);
 
     const boundedEvidence = JSON.stringify({ entries, relationshipData, plan });
     for (const secret of [config.githubToken, process.env.MCP_OAUTH_SIGNING_SECRET!, "test-access-code-admin"]) {

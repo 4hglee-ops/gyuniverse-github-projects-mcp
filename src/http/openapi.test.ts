@@ -7,7 +7,7 @@ import { handleRemoteHttpRequest } from "./router.js";
 test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", () => {
   const document = openApiDocument("https://example.test");
   assert.equal(document.openapi, "3.1.0");
-  assert.equal(document.info.version, "0.4.0");
+  assert.equal(document.info.version, "0.5.0");
   assert.ok(document.paths["/api/v1/identity"]);
   assert.ok(document.paths["/api/v1/project/brief"]);
   assert.ok(document.paths["/api/v1/project/my-work"]);
@@ -57,6 +57,39 @@ test("OpenAPI exposes all M10 relationship and bulk operation IDs without secret
   for (const forbidden of ["client_secret", "access_token", "refresh_token", "authorization code", "cookie"]) {
     assert.doesNotMatch(serialized.toLowerCase(), new RegExp(forbidden.replace(" ", "\\s+")));
   }
+});
+
+test("OpenAPI teaches GPT Actions to use friendly Project item references without inventing IDs or owners", () => {
+  const document = openApiDocument("https://example.test");
+  type ActionSchema = { required: readonly string[]; properties: Record<string, { description: string }> };
+  const read = document.paths["/api/v1/project/item-relationships"].post.requestBody.content["application/json"].schema as ActionSchema;
+  assert.deepEqual(read.required, ["number"]);
+  assert.ok("url" in read.properties);
+  assert.ok("repository" in read.properties);
+  assert.ok("itemNumber" in read.properties);
+  assert.match(read.properties.itemId.description, /do not invent/i);
+  assert.match(read.properties.itemNumber.description, /unique inside the authorized Project/i);
+  assert.match(read.properties.owner.description, /Never infer.*githubLogin/i);
+
+  const relationship = document.paths["/api/v1/write/relationship/add-sub-issue"].post;
+  const relationshipSchema = relationship.requestBody.content["application/json"].schema as ActionSchema;
+  assert.deepEqual(relationshipSchema.required, ["number"]);
+  assert.ok("sourceUrl" in relationshipSchema.properties);
+  assert.ok("sourceNumber" in relationshipSchema.properties);
+  assert.ok("targetUrl" in relationshipSchema.properties);
+  assert.ok("targetNumber" in relationshipSchema.properties);
+  assert.match(relationship.description, /same authorized Project/i);
+
+  const bulk = document.paths["/api/v1/write/bulk/preview"].post;
+  const bulkSchema = bulk.requestBody.content["application/json"].schema as {
+    properties: { operations: { items: ActionSchema } };
+  };
+  const operation = bulkSchema.properties.operations.items;
+  assert.deepEqual(operation.required, ["field", "value"]);
+  assert.ok("url" in operation.properties);
+  assert.ok("repository" in operation.properties);
+  assert.ok("number" in operation.properties);
+  assert.match(bulk.description, /before the immutable Preview is persisted/i);
 });
 
 test("OpenAPI tells actions not to blindly retry non-idempotent partial failures", () => {
