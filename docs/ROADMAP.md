@@ -12,7 +12,7 @@
 | M7 Identity Foundation | Complete | Individual identity + permission model |
 | M8 High-level Write | Complete | Semantic write + idempotency + verify + audit |
 | M9 REST / GPT Actions | Complete | Operator GPT read/write adapter |
-| M10 Advanced Governance | In progress | Durable state / Bulk / Sub-issue / Dependency |
+| M10 Advanced Governance | Complete | Durable state / Bulk / Sub-issue / Dependency |
 
 ## M4 ✅
 - [x] Inspect Project #2 and preserve Priority P0 / P1 / P2 / P3
@@ -247,19 +247,42 @@ correlation evidence remained readable. The 236-test ACL suite covers the
 Viewer/Member runtime denials and existing Member single-item compatibility.
 
 Direct Viewer/Member role-specific Production OAuth reconnection is deliberately
-deferred to M10-7 because those identities were not connected for this smoke. It
-is follow-up validation, not an M10-6 completion blocker. No relationship or bulk
+deferred because those identities were not connected for the closeout. It is
+follow-up validation, not an M10 completion blocker. No relationship or bulk
 mutation was repeated for this closeout.
+
+### M10-7 Production validation / close
+- [x] Confirm PR #48 latest `main` deployment is Production `READY`
+- [x] Confirm `/mcp` OAuth challenge, authenticated calls, and runtime health
+- [x] Confirm the complete M10 tool surface in the deployed server path and registration regressions
+- [x] Confirm Admin identity, Project #2 read, and actor/owner separation
+- [x] Confirm Issues #8/#9 are Backlog with clean relationship state
+- [x] Confirm durable checkpoint and representative relationship/bulk audits survive redeploys
+- [x] Preserve accepted completed/completed/stale-failed bulk-plan terminal evidence without re-Apply
+- [x] Re-run typecheck, build, and all 236 tests
+- [x] Record deferred identity smoke, limitations, and operations in `M10_CLOSEOUT.md`
 
 ### Remaining
 - [x] M10-4 review / Production validation and close
 - [x] M10-5 review / Production validation and close
 - [x] M10-6 Richer ACL — Complete
-- [ ] M10-7 Production validation / milestone close — Next
+- [x] M10-7 Production validation / close — Complete
+
+```text
+M10-1 Durable checkpoint               ✅
+M10-2 Durable write audit              ✅
+M10-3 Dependency / sub-issue read      ✅
+M10-4 Guarded relationship write       ✅
+M10-5 Bulk Preview → Approval → Apply  ✅
+M10-6 Richer ACL                       ✅
+M10-7 Production validation / close    ✅
+
+M10 Advanced Governance                ✅ COMPLETE
+```
 
 Iteration remains optional and is not reintroduced into Project #2 unless the operating model changes explicitly.
 
-See `M10_ADVANCED_GOVERNANCE.md` and `M10_RELATIONSHIP_WRITES.md`.
+See `M10_CLOSEOUT.md`, `M10_ADVANCED_GOVERNANCE.md`, and `M10_RELATIONSHIP_WRITES.md`.
 
 ## Product direction
 Build an AI Project Operator, not a generic wrapper around every GitHub Projects API.
