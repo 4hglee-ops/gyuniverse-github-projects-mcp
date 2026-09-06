@@ -4,6 +4,8 @@
   "rewrites": [
     { "source": "/.well-known/:path*", "destination": "/api" },
     { "source": "/oauth/:path*", "destination": "/api" },
+    { "source": "/openapi.json", "destination": "/api" },
+    { "source": "/api/v1/:path*", "destination": "/api" },
     { "source": "/mcp", "destination": "/api" },
     { "source": "/health", "destination": "/api" }
   ]
