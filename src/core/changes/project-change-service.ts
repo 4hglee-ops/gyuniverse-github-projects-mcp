@@ -2,11 +2,14 @@ import { SnapshotService } from "../snapshots/snapshot-service.js";
 import {
   compareProjectStateCheckpoint,
   createProjectStateCheckpoint,
-  ProjectCheckpointStore,
   type ProjectSnapshotLike,
   type ProjectStateComparison,
   type ProjectStateDelta,
 } from "../../workflow/checkpoint.js";
+import {
+  MemoryProjectCheckpointStore,
+  type ProjectCheckpointStoreLike,
+} from "./checkpoint-store.js";
 
 export interface ChangeReadOptions {
   first?: number;
@@ -41,8 +44,8 @@ export interface ProjectChangesResult {
   } | null;
   checkpointReplaced: false;
   persistence: {
-    kind: "process_local";
-    survivesServerRestart: false;
+    kind: "process_local" | "upstash";
+    survivesServerRestart: boolean;
   };
 }
 
@@ -63,11 +66,11 @@ function grouped(comparison: ProjectStateComparison | null): ProjectChangesResul
   };
 }
 
-/** Shared checkpoint/change boundary used by MCP and future REST adapters. */
+/** Shared checkpoint/change boundary used by MCP and REST adapters. */
 export class ProjectChangeService {
   constructor(
     private readonly snapshots: SnapshotService,
-    private readonly checkpoints = new ProjectCheckpointStore(),
+    private readonly checkpoints: ProjectCheckpointStoreLike = new MemoryProjectCheckpointStore(),
   ) {}
 
   async captureBaseline(owner: string, number: number, first = 100) {
@@ -77,25 +80,26 @@ export class ProjectChangeService {
       projectNumber: number,
       requestedItems: first,
     });
-    this.checkpoints.set(checkpoint);
+    await this.checkpoints.set(checkpoint);
     return {
       checkpoint,
       persistence: {
-        kind: "process_local" as const,
-        survivesServerRestart: false as const,
-        note: "The latest checkpoint is kept only in this server process. Durable checkpoint storage remains deferred to M10.",
+        ...this.checkpoints.persistence,
+        note: this.checkpoints.persistence.survivesServerRestart
+          ? "The latest checkpoint is stored durably in the configured M10 governance store."
+          : "The latest checkpoint is kept only in this server process.",
       },
     };
   }
 
   async getChanges(owner: string, number: number, options: ChangeReadOptions = {}): Promise<ProjectChangesResult> {
     const first = options.first ?? 100;
-    let baseline = this.checkpoints.get(owner, number);
+    let baseline = await this.checkpoints.get(owner, number);
 
     if (!baseline) {
       if (!options.initializeIfMissing) {
         throw new Error(
-          `No process-local checkpoint exists for ${owner} Project #${number}. Create one first or call get_project_changes with initializeIfMissing=true.`,
+          `No checkpoint exists for ${owner} Project #${number}. Create one first or call get_project_changes with initializeIfMissing=true.`,
         );
       }
       const initialized = await this.captureBaseline(owner, number, first);
@@ -112,7 +116,7 @@ export class ProjectChangeService {
         },
         current: null,
         checkpointReplaced: false,
-        persistence: { kind: "process_local", survivesServerRestart: false },
+        persistence: this.checkpoints.persistence,
       };
     }
 
@@ -140,7 +144,7 @@ export class ProjectChangeService {
         coverage: current.coverage,
       },
       checkpointReplaced: false,
-      persistence: { kind: "process_local", survivesServerRestart: false },
+      persistence: this.checkpoints.persistence,
     };
   }
 }
