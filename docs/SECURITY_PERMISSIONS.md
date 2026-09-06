@@ -1,50 +1,54 @@
 # Security & Permission Model — Identity / ACL / Write Safety
 
-## Current limitation
-`MCP_OAUTH_TEAM_CODE` is a team-level approval gate and does not identify individual users.
+## Identity baseline
 
-## Target authorization chain
+Individual OAuth identities are authoritative. The legacy team-code subject is
+read-only and does not receive write or bulk capabilities.
+
+## Authorization chain
 
 ```text
 Authentication
   -> User Identity
+  -> Owner / Project allowlists
   -> Project Membership
-  -> Role / Permission
-  -> Operation Policy
+  -> Operation Capability
   -> Write Guard
   -> GitHub Mutation
 ```
 
-## Permission model
-Roles are permission bundles; operation permissions are the enforcement primitive.
+Roles are migration-compatible permission bundles; operation capabilities are the
+runtime enforcement primitive.
 
-```text
-project.read
-backlog.create
-item.create
-item.update_status
-item.update_priority
-item.assign_self
-item.assign_any
-iteration.update
-bulk.preview
-bulk.apply
-```
+| Capability | Admin | Member | Viewer |
+|---|---:|---:|---:|
+| `project.read` | yes | yes | yes |
+| `project.write` | yes | yes | no |
+| `item.add` | yes | yes | no |
+| `item.update_status` / `item.update_priority` | yes | yes | no |
+| `item.create` / `item.assign` / `item.update_field` | yes | no | no |
+| `item.relationship.write` | yes | no | no |
+| `bulk.preview` / `bulk.approve` / `bulk.apply` | yes | no | no |
 
-| Capability | Admin / PM | Member | Viewer |
-|---|---|---|---|
-| Read | yes | yes | yes |
-| Backlog / item create | yes | yes | no |
-| Assign self | yes | yes | no |
-| Assign others | yes | policy-based | no |
-| Status / Priority | yes | yes | no |
-| Iteration | yes | policy-based | no |
-| Bulk apply | yes | no | no |
-| Delete / project settings | disabled initially | no | no |
+An OAuth identity may include an explicit `permissions` array to narrow its role
+bundle. Overrides cannot add a permission absent from the role default, so they do
+not elevate Viewer or Member.
+
+Every authenticated Project decision intersects the server owner allowlist,
+explicit Project allowlist, identity `projectIds` membership and operation
+capability. Authenticated access fails closed when either allowlist is empty.
+`githubLogin` is actor identity only and is never used as Project owner.
+
+Bulk approval defaults to `same_admin_allowed`.
+`M10_BULK_APPROVAL_MODE=distinct_admin_required` rejects creator self-approval;
+another authorized Admin with `bulk.approve` and Project access may approve. The
+Apply actor may differ and must independently hold `bulk.apply` and all underlying
+item-write capabilities. Durable plans never preserve old authority.
 
 ## Write risk levels
-- Level 1: safe single mutation -> permission + validation + verify + audit
-- Level 2: coordinating mutation -> stronger permission checks
+
+- Level 1: safe single mutation -> capability + validation + verify + audit
+- Level 2: coordinating mutation -> stronger capability checks
 - Level 3: bulk / AI judgment -> Preview -> explicit approval -> Apply
 - Destructive: not exposed in v1
 
@@ -54,18 +58,16 @@ bulk.apply
 Client confirmation
 + Authenticated User Identity
 + Server ACL
-+ Project allowlist
-+ Operation policy
++ Owner and Project allowlists
++ Project membership
++ Operation capability
 + Idempotency
 + Re-read verification
-+ Audit
++ Durable audit
 ```
 
-## Idempotency
-Support `Idempotency-Key` or a server request ID so retries do not duplicate writes.
-
 ## OAuth client separation
-Use separate client policy for:
-- chatgpt-mcp
-- claude-mcp
-- chatgpt-actions
+
+OAuth configuration remains separated for ChatGPT MCP, Claude MCP and GPT
+Actions. Client type does not change Project ACL: every transport resolves the
+same bounded principal and Shared Core policy.

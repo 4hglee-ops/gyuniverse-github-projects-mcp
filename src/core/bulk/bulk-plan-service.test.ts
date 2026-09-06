@@ -10,6 +10,7 @@ import { principalForRole, type AuthenticatedPrincipal } from "../identity/princ
 import { WritePolicy } from "../policy/write-policy.js";
 import { MemoryBulkPlanStore } from "./bulk-plan-store.js";
 import { BulkPlanService } from "./bulk-plan-service.js";
+import type { BulkApprovalMode } from "../../config.js";
 
 const config: AppConfig = { githubToken: "test", allowedOwners: ["gyuniverse-hq"], allowedProjectIds: ["PVT_PROJECT"], writeEnabled: true };
 const admin = principalForRole("user:admin", "admin", { projectIds: ["PVT_PROJECT"] });
@@ -20,13 +21,16 @@ interface FixtureOptions {
   now?: Date;
   failAtUpdate?: number;
   auditStore?: WriteAuditStoreLike;
+  states?: Map<string, { id: string; name: string } | null>;
+  updates?: NamedSingleSelectUpdateInput[];
+  bulkApprovalMode?: BulkApprovalMode;
 }
 
 function fixture(options: FixtureOptions = {}) {
   const principal = options.principal ?? admin;
   const store = options.store ?? new MemoryBulkPlanStore();
   const audit = new AuditService(200, options.auditStore ?? new MemoryWriteAuditStore());
-  const states = new Map<string, { id: string; name: string } | null>([
+  const states = options.states ?? new Map<string, { id: string; name: string } | null>([
     ["ITEM1\0Status", { id: "S_TODO", name: "Todo" }],
     ["ITEM2\0Priority", null],
     ["ITEM3\0Status", { id: "S_BACKLOG", name: "Backlog" }],
@@ -36,7 +40,7 @@ function fixture(options: FixtureOptions = {}) {
     Todo: { id: "S_TODO", name: "Todo" },
     P1: { id: "P1", name: "P1" },
   };
-  const updates: NamedSingleSelectUpdateInput[] = [];
+  const updates = options.updates ?? [];
   let currentNow = options.now ?? new Date("2026-09-07T00:00:00.000Z");
   const inspect = async (_client: GitHubGraphQlClient, input: NamedSingleSelectUpdateInput): Promise<NamedSingleSelectPreview> => {
     const requested = optionsByName[input.optionName];
@@ -66,6 +70,7 @@ function fixture(options: FixtureOptions = {}) {
     projects: { async resolveProject() { return { id: "PVT_PROJECT" }; } },
     principal, writePolicy: new WritePolicy(config, principal), audit, store,
     now: () => new Date(currentNow), inspect, update,
+    bulkApprovalMode: options.bulkApprovalMode,
   });
   return { service, store, audit, states, updates, setNow(value: string) { currentNow = new Date(value); } };
 }
@@ -100,6 +105,7 @@ test("immutable preview, explicit same-admin approval, single-use apply and corr
   const audits = await f.audit.list();
   assert.equal(audits.entries.length, 2);
   assert.ok(audits.entries.every((entry) => entry.planId === preview.planId && entry.verified));
+  assert.deepEqual(new Set(audits.entries.map((entry) => entry.capability)), new Set(["item.update_status", "item.update_priority"]));
 
   const duplicate = await f.service.apply(preview.planId, preview.planDigest);
   assert.deepEqual(duplicate, applied);
@@ -178,15 +184,101 @@ test("plans expire before approval/apply and digest mismatch cannot approve", as
   assert.equal(f.updates.length, 0);
 });
 
-test("M10-5 requires the same authenticated admin and enforces bounds", async () => {
+test("M10 bulk preview is capability-gated and enforces bounds", async () => {
   const shared = new MemoryBulkPlanStore();
   const creator = fixture({ store: shared });
   const plan = await creator.service.preview("gyuniverse-hq", 2, requests);
   const other = fixture({ store: shared, principal: principalForRole("user:other", "admin", { projectIds: ["PVT_PROJECT"] }) });
-  await assert.rejects(() => other.service.approve(plan.planId, plan.planDigest), /BULK_PLAN_ACTOR_MISMATCH/);
+  assert.equal((await other.service.approve(plan.planId, plan.planDigest)).approvedBy, "user:other");
   const member = fixture({ principal: principalForRole("user:member", "member", { projectIds: ["PVT_PROJECT"] }) });
-  await assert.rejects(() => member.service.preview("gyuniverse-hq", 2, requests), /BULK_ADMIN_REQUIRED/);
+  await assert.rejects(() => member.service.preview("gyuniverse-hq", 2, requests), /PERMISSION_DENIED/);
   await assert.rejects(() => creator.service.preview("gyuniverse-hq", 2, []), /BULK_PLAN_SIZE_INVALID/);
   await assert.rejects(() => creator.service.preview("gyuniverse-hq", 2, Array.from({ length: 21 }, (_, i) => ({ itemId: `I${i}`, field: "Status", value: "Todo" }))), /BULK_PLAN_SIZE_INVALID/);
   await assert.rejects(() => creator.service.preview("gyuniverse-hq", 2, [requests[0]!, requests[0]!]), /BULK_PLAN_DUPLICATE_TARGET/);
+});
+
+test("distinct approval supports separate creator, approver and applier capabilities", async () => {
+  const store = new MemoryBulkPlanStore();
+  const states = new Map<string, { id: string; name: string } | null>([
+    ["ITEM1\0Status", { id: "S_TODO", name: "Todo" }],
+    ["ITEM2\0Priority", null],
+    ["ITEM3\0Status", { id: "S_BACKLOG", name: "Backlog" }],
+  ]);
+  const updates: NamedSingleSelectUpdateInput[] = [];
+  const creator = fixture({ store, states, updates, bulkApprovalMode: "distinct_admin_required" });
+  const plan = await creator.service.preview("gyuniverse-hq", 2, requests);
+  await assert.rejects(() => creator.service.approve(plan.planId, plan.planDigest), /DISTINCT_APPROVER_REQUIRED/);
+
+  const approverPrincipal = principalForRole("user:approver", "admin", {
+    projectIds: ["PVT_PROJECT"],
+    permissions: ["project.read", "project.write", "bulk.approve"],
+  });
+  const approver = fixture({ principal: approverPrincipal, store, states, updates, bulkApprovalMode: "distinct_admin_required" });
+  const approved = await approver.service.approve(plan.planId, plan.planDigest);
+  assert.equal(approved.approvedBy, "user:approver");
+
+  const applierPrincipal = principalForRole("user:applier", "admin", {
+    projectIds: ["PVT_PROJECT"],
+    permissions: ["project.read", "project.write", "bulk.apply", "item.update_status", "item.update_priority"],
+  });
+  const applier = fixture({ principal: applierPrincipal, store, states, updates, bulkApprovalMode: "distinct_admin_required" });
+  const applied = await applier.service.apply(plan.planId, plan.planDigest);
+  assert.equal(applied.state, "completed");
+  assert.deepEqual(applied.events.map((event) => [event.type, event.actorId]), [
+    ["preview_created", "user:admin"],
+    ["approved", "user:approver"],
+    ["apply_started", "user:applier"],
+    ["apply_completed", "user:applier"],
+  ]);
+  assert.equal(updates.length, 2);
+});
+
+test("permissions are rechecked after Preview and after Approval", async () => {
+  const beforeApproval = principalForRole("user:revoked-item", "admin", { projectIds: ["PVT_PROJECT"] });
+  const first = fixture({ principal: beforeApproval });
+  const preview = await first.service.preview("gyuniverse-hq", 2, requests);
+  await first.service.approve(preview.planId, preview.planDigest);
+  beforeApproval.permissions = beforeApproval.permissions.filter((permission) => permission !== "item.update_status");
+  await assert.rejects(() => first.service.apply(preview.planId, preview.planDigest), /PERMISSION_DENIED.*item\.update_status/);
+  assert.equal(first.updates.length, 0);
+  assert.equal((await first.service.get(preview.planId)).state, "approved");
+
+  const afterApproval = principalForRole("user:revoked-apply", "admin", { projectIds: ["PVT_PROJECT"] });
+  const second = fixture({ principal: afterApproval });
+  const approved = await second.service.preview("gyuniverse-hq", 2, requests);
+  await second.service.approve(approved.planId, approved.planDigest);
+  afterApproval.permissions = afterApproval.permissions.filter((permission) => permission !== "bulk.apply");
+  await assert.rejects(() => second.service.apply(approved.planId, approved.planDigest), /PERMISSION_DENIED.*bulk\.apply/);
+  assert.equal(second.updates.length, 0);
+  assert.equal((await second.service.get(approved.planId)).state, "approved");
+});
+
+test("viewer/member and an approval-only actor cannot execute bulk Apply", async () => {
+  const store = new MemoryBulkPlanStore();
+  const creator = fixture({ store });
+  const plan = await creator.service.preview("gyuniverse-hq", 2, requests);
+  await creator.service.approve(plan.planId, plan.planDigest);
+
+  for (const role of ["viewer", "member"] as const) {
+    const denied = fixture({ store, principal: principalForRole(`user:${role}`, role, { projectIds: ["PVT_PROJECT"] }) });
+    await assert.rejects(() => denied.service.apply(plan.planId, plan.planDigest), /PERMISSION_DENIED/);
+    await assert.rejects(() => denied.service.get(plan.planId), /CAPABILITY_REQUIRED/);
+  }
+  const approvalOnly = fixture({ store, principal: principalForRole("user:approval-only", "admin", {
+    projectIds: ["PVT_PROJECT"], permissions: ["project.read", "project.write", "bulk.approve"],
+  }) });
+  await assert.rejects(() => approvalOnly.service.apply(plan.planId, plan.planDigest), /PERMISSION_DENIED.*bulk\.apply/);
+  assert.equal(creator.updates.length, 0);
+});
+
+test("a stricter maker-checker policy is enforced again before an active plan applies", async () => {
+  const store = new MemoryBulkPlanStore();
+  const creator = fixture({ store });
+  const plan = await creator.service.preview("gyuniverse-hq", 2, requests);
+  await creator.service.approve(plan.planId, plan.planDigest);
+
+  const strict = fixture({ store, principal: admin, bulkApprovalMode: "distinct_admin_required" });
+  await assert.rejects(() => strict.service.apply(plan.planId, plan.planDigest), /DISTINCT_APPROVER_REQUIRED/);
+  assert.equal(strict.updates.length, 0);
+  assert.equal((await strict.service.get(plan.planId)).state, "approved");
 });

@@ -9,7 +9,25 @@ export type ProjectPermission =
   | "item.update_field"
   | "item.update_status"
   | "item.update_priority"
-  | "item.relationship.write";
+  | "item.relationship.write"
+  | "bulk.preview"
+  | "bulk.approve"
+  | "bulk.apply";
+
+export const PROJECT_PERMISSIONS: readonly ProjectPermission[] = [
+  "project.read",
+  "project.write",
+  "item.add",
+  "item.create",
+  "item.assign",
+  "item.update_field",
+  "item.update_status",
+  "item.update_priority",
+  "item.relationship.write",
+  "bulk.preview",
+  "bulk.approve",
+  "bulk.apply",
+];
 
 export interface AuthenticatedPrincipal {
   id: string;
@@ -32,6 +50,9 @@ const ROLE_PERMISSIONS: Record<ProjectRole, readonly ProjectPermission[]> = {
     "item.update_status",
     "item.update_priority",
     "item.relationship.write",
+    "bulk.preview",
+    "bulk.approve",
+    "bulk.apply",
   ],
   member: [
     "project.read",
@@ -50,12 +71,19 @@ export function permissionsForRole(role: ProjectRole): ProjectPermission[] {
 export function principalForRole(
   id: string,
   role: ProjectRole,
-  options: Partial<Omit<AuthenticatedPrincipal, "id" | "role" | "permissions">> = {},
+  options: Partial<Omit<AuthenticatedPrincipal, "id" | "role" | "permissions">> & {
+    permissions?: ProjectPermission[];
+  } = {},
 ): AuthenticatedPrincipal {
+  const defaults = permissionsForRole(role);
+  const permissions = [...new Set(options.permissions ?? defaults)];
+  if (permissions.some((permission) => !defaults.includes(permission))) {
+    throw new Error(`Role '${role}' permission overrides may narrow but not expand its defaults.`);
+  }
   return {
     id,
     role,
-    permissions: permissionsForRole(role),
+    permissions,
     projectIds: [...new Set(options.projectIds ?? [])],
     displayName: options.displayName ?? null,
     githubLogin: options.githubLogin ?? null,

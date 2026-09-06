@@ -40,19 +40,29 @@ export class ProjectService {
 
   constructor(private readonly options: ProjectServiceOptions) {}
 
+  private assertOwnerScope(owner: string): void {
+    if (this.options.principal && this.options.config.allowedOwners.length === 0) {
+      throw new Error(
+        "OWNER_ALLOWLIST_REQUIRED: Authenticated Project access requires an explicit server owner allowlist.",
+      );
+    }
+    if (this.options.principal && this.options.config.allowedProjectIds.length === 0) {
+      throw new Error(
+        "PROJECT_ALLOWLIST_REQUIRED: Authenticated Project access requires an explicit server Project allowlist.",
+      );
+    }
+    assertOwnerAllowed(this.options.config, owner);
+  }
+
   private assertPrincipalRead(projectId: string): void {
     const principal = this.options.principal ?? null;
     if (!principal) return;
     this.identity.assertPermission(principal, "project.read");
-    if (!principalHasProject(principal, projectId)) {
-      throw new Error(
-        `PROJECT_MEMBERSHIP_DENIED: Principal '${principal.id}' is not assigned to Project '${projectId}'.`,
-      );
-    }
+    this.identity.assertProjectMembership(principal, projectId);
   }
 
   async listProjects(owner: string, first = 20): Promise<unknown[]> {
-    assertOwnerAllowed(this.options.config, owner);
+    this.assertOwnerScope(owner);
     const projects = await listProjects(this.options.client, owner, first);
 
     return projects.filter((project) => {
@@ -76,7 +86,7 @@ export class ProjectService {
   }
 
   async resolveProject(owner: string, number: number): Promise<unknown> {
-    assertOwnerAllowed(this.options.config, owner);
+    this.assertOwnerScope(owner);
     const project = await getProject(this.options.client, owner, number);
     const projectId = projectIdOf(project);
     assertProjectAllowed(this.options.config, projectId);

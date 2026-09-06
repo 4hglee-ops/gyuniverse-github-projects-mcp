@@ -91,3 +91,20 @@ test("admin retains generic field and assignment write surfaces", () => {
   assert.equal(assignment.permission, "item.assign");
   assert.equal(assignment.actorId, "admin-1");
 });
+
+test("bulk operations use distinct capability checks while keeping Project scope", () => {
+  const admin = principal("admin-1", "admin");
+  const policy = new WritePolicy(config(), admin);
+  assert.equal(policy.authorize({ operation: "preview_bulk_plan", projectId: "PVT_allowed" }).permission, "bulk.preview");
+  assert.equal(policy.authorize({ operation: "approve_bulk_plan", projectId: "PVT_allowed" }).permission, "bulk.approve");
+  assert.equal(policy.authorize({ operation: "apply_bulk_plan", projectId: "PVT_allowed" }).permission, "bulk.apply");
+
+  const narrowed = principalForRole("admin-approver", "admin", {
+    projectIds: ["PVT_allowed"],
+    permissions: ["project.read", "project.write", "bulk.approve"],
+  });
+  const approvalOnly = new WritePolicy(config(), narrowed);
+  assert.doesNotThrow(() => approvalOnly.authorize({ operation: "approve_bulk_plan", projectId: "PVT_allowed" }));
+  assert.throws(() => approvalOnly.authorize({ operation: "apply_bulk_plan", projectId: "PVT_allowed" }), /PERMISSION_DENIED/);
+  assert.throws(() => approvalOnly.authorize({ operation: "approve_bulk_plan", projectId: "PVT_other" }), /Project is not allowed/);
+});

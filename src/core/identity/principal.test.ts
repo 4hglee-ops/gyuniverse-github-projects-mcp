@@ -22,10 +22,31 @@ test("member receives selected writes but not generic field mutation", () => {
   assert.equal(principalHasPermission(member, "item.update_status"), true);
   assert.equal(principalHasPermission(member, "item.update_priority"), true);
   assert.equal(principalHasPermission(member, "item.update_field"), false);
+  assert.equal(principalHasPermission(member, "item.relationship.write"), false);
+  assert.equal(principalHasPermission(member, "bulk.preview"), false);
+  assert.equal(principalHasPermission(member, "bulk.approve"), false);
+  assert.equal(principalHasPermission(member, "bulk.apply"), false);
 });
 
 test("admin receives the full current write surface", () => {
   const admin = principalForRole("admin-1", "admin", { projectIds: ["PVT_allowed"] });
   assert.equal(principalHasPermission(admin, "project.write"), true);
   assert.equal(principalHasPermission(admin, "item.update_field"), true);
+  assert.equal(principalHasPermission(admin, "item.relationship.write"), true);
+  assert.equal(principalHasPermission(admin, "bulk.preview"), true);
+  assert.equal(principalHasPermission(admin, "bulk.approve"), true);
+  assert.equal(principalHasPermission(admin, "bulk.apply"), true);
+});
+
+test("an explicit permission snapshot can narrow role defaults without changing role identity", () => {
+  const approver = principalForRole("admin-approver", "admin", {
+    projectIds: ["PVT_allowed"],
+    permissions: ["project.read", "project.write", "bulk.approve"],
+  });
+  assert.equal(approver.role, "admin");
+  assert.deepEqual(approver.permissions, ["project.read", "project.write", "bulk.approve"]);
+  assert.equal(principalHasPermission(approver, "bulk.apply"), false);
+  assert.throws(() => principalForRole("viewer-expanded", "viewer", {
+    projectIds: ["PVT_allowed"], permissions: ["project.read", "bulk.apply"],
+  }), /may narrow but not expand/);
 });

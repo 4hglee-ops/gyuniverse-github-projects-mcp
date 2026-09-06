@@ -32,7 +32,7 @@ export function registerBulkPlanTools({ server, bulk, json }: Options): void {
   server.registerTool(
     "approve_github_project_bulk_plan",
     {
-      description: "Explicitly approve the exact immutable bulk preview identified by plan ID and digest. M10-5 permits the creating admin to approve; this does not mutate GitHub.",
+      description: "Explicitly approve the exact immutable bulk preview identified by plan ID and digest. The current maker-checker policy and bulk.approve capability are enforced; this does not mutate GitHub.",
       inputSchema: planReference,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -52,7 +52,7 @@ export function registerBulkPlanTools({ server, bulk, json }: Options): void {
   server.registerTool(
     "get_github_project_bulk_plan",
     {
-      description: "Read the durable state, immutable artifact, plan-level events and per-item results of an M10-5 plan created by the same admin.",
+      description: "Read the durable state, immutable artifact, plan-level actor events and per-item results of an authorized M10 bulk plan. Project access and a bulk workflow capability are required.",
       inputSchema: z.object({ planId: planReference.shape.planId }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },

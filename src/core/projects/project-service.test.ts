@@ -107,3 +107,28 @@ test("read methods reuse resolveProject before fetching project data", async () 
   assert.deepEqual(await service.listProjectFields("gyuniverse-hq", 2), []);
   assert.ok(queries.length >= 2);
 });
+
+test("authenticated access requires an owner allowlist and never substitutes githubLogin for owner", async () => {
+  let queries = 0;
+  const client = new StubGraphQlClient((_query, variables) => {
+    queries += 1;
+    return { repositoryOwner: { projectV2: { id: "PVT_allowed", number: variables.number } } };
+  });
+  const principal = principalForRole("user:admin", "admin", {
+    githubLogin: "4hglee-ops",
+    projectIds: ["PVT_allowed"],
+  });
+
+  const missingOwnerAllowlist = new ProjectService({ config: config({ allowedOwners: [] }), client, principal });
+  await assert.rejects(() => missingOwnerAllowlist.resolveProject("gyuniverse-hq", 2), /OWNER_ALLOWLIST_REQUIRED/);
+  assert.equal(queries, 0);
+
+  const missingProjectAllowlist = new ProjectService({ config: config({ allowedProjectIds: [] }), client, principal });
+  await assert.rejects(() => missingProjectAllowlist.resolveProject("gyuniverse-hq", 2), /PROJECT_ALLOWLIST_REQUIRED/);
+  assert.equal(queries, 0);
+
+  const service = new ProjectService({ config: config(), client, principal });
+  assert.equal((await service.resolveProject("gyuniverse-hq", 2) as { id: string }).id, "PVT_allowed");
+  await assert.rejects(() => service.resolveProject("4hglee-ops", 2), /owner is not allowed/);
+  assert.equal(queries, 1);
+});

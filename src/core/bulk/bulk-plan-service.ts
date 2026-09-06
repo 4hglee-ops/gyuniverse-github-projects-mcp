@@ -12,6 +12,8 @@ import {
 } from "../../workflow/single-select-update.js";
 import { bulkErrorCode, createBulkPlan, type BulkField, type BulkPlan, type BulkPlanArtifact, type BulkPlanOperation } from "./bulk-plan.js";
 import type { BulkPlanStoreLike } from "./bulk-plan-store.js";
+import { BulkApprovalPolicy } from "../policy/bulk-approval-policy.js";
+import type { BulkApprovalMode } from "../../config.js";
 
 export interface BulkUpdateRequest { itemId: string; field: BulkField; value: string }
 export interface BulkPlanProjectReader { resolveProject(owner: string, number: number): Promise<unknown> }
@@ -27,6 +29,7 @@ interface BulkPlanServiceOptions {
   ttlMs?: number;
   inspect?: (client: GitHubGraphQlClient, input: NamedSingleSelectUpdateInput) => Promise<NamedSingleSelectPreview>;
   update?: (client: GitHubGraphQlClient, input: NamedSingleSelectUpdateInput) => Promise<NamedSingleSelectUpdateResult>;
+  bulkApprovalMode?: BulkApprovalMode;
 }
 
 const operationFor = (field: BulkField): WriteOperation => field === "Status" ? "update_status" : "update_priority";
@@ -36,24 +39,27 @@ export class BulkPlanService {
   private readonly ttlMs: number;
   private readonly inspect: NonNullable<BulkPlanServiceOptions["inspect"]>;
   private readonly update: NonNullable<BulkPlanServiceOptions["update"]>;
+  private readonly approvalPolicy: BulkApprovalPolicy;
 
   constructor(private readonly options: BulkPlanServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.ttlMs = options.ttlMs ?? 15 * 60 * 1000;
     this.inspect = options.inspect ?? inspectProjectSingleSelectByName;
     this.update = options.update ?? updateProjectSingleSelectByName;
+    this.approvalPolicy = new BulkApprovalPolicy(options.bulkApprovalMode);
     if (!Number.isInteger(this.ttlMs) || this.ttlMs < 60_000 || this.ttlMs > 60 * 60 * 1000) {
       throw new Error("BULK_PLAN_TTL_INVALID: TTL must be between one minute and one hour.");
     }
   }
 
   async preview(owner: string, number: number, requests: BulkUpdateRequest[]): Promise<BulkPlan> {
-    const actor = this.assertAdmin();
+    const actor = this.assertAuthenticated();
     if (requests.length < 1 || requests.length > 20) throw new Error("BULK_PLAN_SIZE_INVALID: Provide between 1 and 20 operations.");
     const keys = requests.map((item) => `${item.itemId}\0${item.field}`);
     if (new Set(keys).size !== keys.length) throw new Error("BULK_PLAN_DUPLICATE_TARGET: Each item/field pair may appear only once.");
     const project = await this.options.projects.resolveProject(owner, number);
     const projectId = projectIdOf(project);
+    this.options.writePolicy.authorize({ operation: "preview_bulk_plan", projectId });
     for (const request of requests) this.options.writePolicy.authorize({ operation: operationFor(request.field), projectId });
 
     const operations: BulkPlanOperation[] = [];
@@ -80,22 +86,23 @@ export class BulkPlanService {
   }
 
   async get(planId: string): Promise<BulkPlan> {
-    const actor = this.assertAdmin();
+    const actor = this.assertAuthenticated();
     const plan = await this.required(planId);
-    this.assertOwner(plan, actor.id);
+    await this.assertProjectRead(plan);
+    this.assertBulkParticipant(actor);
     return this.expireIfNeeded(plan, actor.id);
   }
 
   async approve(planId: string, planDigest: string): Promise<BulkPlan> {
-    const actor = this.assertAdmin();
+    const actor = this.assertAuthenticated();
     let plan = await this.required(planId);
-    this.assertOwner(plan, actor.id);
     this.assertDigest(plan, planDigest);
     plan = await this.expireIfNeeded(plan, actor.id);
+    await this.reauthorizePlanAction(plan, "approve_bulk_plan");
+    this.approvalPolicy.assertApprover(plan.artifact.createdBy, actor.id);
     if (plan.state === "approved" && plan.approvedBy === actor.id) return plan;
     if (plan.state !== "previewed") throw new Error(`BULK_PLAN_NOT_APPROVABLE: Plan state is '${plan.state}'.`);
 
-    await this.reauthorize(plan);
     const at = this.now().toISOString();
     const next: BulkPlan = {
       ...plan, state: "approved", approvedBy: actor.id, approvedAt: at,
@@ -110,19 +117,20 @@ export class BulkPlanService {
   }
 
   async apply(planId: string, planDigest: string): Promise<BulkPlan> {
-    const actor = this.assertAdmin();
+    const actor = this.assertAuthenticated();
     let plan = await this.required(planId);
-    this.assertOwner(plan, actor.id);
     this.assertDigest(plan, planDigest);
     plan = await this.expireIfNeeded(plan, actor.id);
+    await this.reauthorizePlanAction(plan, "apply_bulk_plan", true);
     if (["completed", "partial", "failed", "expired"].includes(plan.state)) return plan;
     if (plan.state === "applying") throw new Error("BULK_PLAN_APPLY_IN_PROGRESS: This plan is already being applied.");
-    if (plan.state !== "approved" || plan.approvedBy !== actor.id) {
-      throw new Error("BULK_PLAN_APPROVAL_REQUIRED: The creating admin must explicitly approve this plan first.");
+    if (plan.state !== "approved" || !plan.approvedBy) {
+      throw new Error("BULK_PLAN_APPROVAL_REQUIRED: An authorized admin must explicitly approve this plan first.");
     }
+    this.approvalPolicy.assertApprover(plan.artifact.createdBy, plan.approvedBy);
 
     try {
-      await this.preflight(plan);
+      await this.preflight(plan, false);
     } catch (error) {
       return this.failBeforeMutation(plan, actor.id, bulkErrorCode(error) === "UNEXPECTED_WRITE_ERROR" ? "PLAN_PREFLIGHT_FAILED" : bulkErrorCode(error));
     }
@@ -200,14 +208,17 @@ export class BulkPlanService {
     return terminal;
   }
 
-  private assertAdmin(): AuthenticatedPrincipal {
+  private assertAuthenticated(): AuthenticatedPrincipal {
     const principal = this.options.principal;
-    if (!principal || principal.role !== "admin") throw new Error("BULK_ADMIN_REQUIRED: M10-5 bulk plans require an authenticated admin.");
+    if (!principal) throw new Error("IDENTITY_REQUIRED: M10 bulk plans require an authenticated principal.");
     return principal;
   }
 
-  private assertOwner(plan: BulkPlan, actorId: string): void {
-    if (plan.artifact.createdBy !== actorId) throw new Error("BULK_PLAN_ACTOR_MISMATCH: M10-5 requires the creating admin.");
+  private assertBulkParticipant(principal: AuthenticatedPrincipal): void {
+    if (!principal.permissions.some((permission) =>
+      permission === "bulk.preview" || permission === "bulk.approve" || permission === "bulk.apply")) {
+      throw new Error("CAPABILITY_REQUIRED: Reading a bulk plan requires a bulk workflow capability.");
+    }
   }
 
   private assertDigest(plan: BulkPlan, digest: string): void {
@@ -220,16 +231,27 @@ export class BulkPlanService {
     return plan;
   }
 
-  private async reauthorize(plan: BulkPlan): Promise<void> {
+  private async assertProjectRead(plan: BulkPlan): Promise<void> {
     const project = await this.options.projects.resolveProject(plan.artifact.projectOwner, plan.artifact.projectNumber);
     if (projectIdOf(project) !== plan.artifact.projectId) throw new Error("BULK_PLAN_PROJECT_CHANGED: Project identity changed.");
-    for (const operation of plan.artifact.operations) {
-      this.options.writePolicy.authorize({ operation: operationFor(operation.field), projectId: plan.artifact.projectId });
+  }
+
+  private async reauthorizePlanAction(
+    plan: BulkPlan,
+    operation: "approve_bulk_plan" | "apply_bulk_plan",
+    includeItemWrites = false,
+  ): Promise<void> {
+    await this.assertProjectRead(plan);
+    this.options.writePolicy.authorize({ operation, projectId: plan.artifact.projectId });
+    if (includeItemWrites) {
+      for (const item of plan.artifact.operations) {
+        this.options.writePolicy.authorize({ operation: operationFor(item.field), projectId: plan.artifact.projectId });
+      }
     }
   }
 
-  private async preflight(plan: BulkPlan): Promise<void> {
-    await this.reauthorize(plan);
+  private async preflight(plan: BulkPlan, reauthorize = true): Promise<void> {
+    if (reauthorize) await this.reauthorizePlanAction(plan, "apply_bulk_plan", true);
     const previews: NamedSingleSelectPreview[] = [];
     for (const operation of plan.artifact.operations) {
       previews.push(await this.inspect(this.options.client, {

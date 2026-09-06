@@ -6,6 +6,7 @@ import {
   type RecordWriteAuditInput,
   type WriteAuditEntry,
 } from "../../workflow/write-audit.js";
+import { PROJECT_PERMISSIONS } from "../identity/principal.js";
 
 export interface AuditStoreListOptions {
   limit?: number;
@@ -81,6 +82,13 @@ function parseStoredEntry(value: unknown): WriteAuditEntry {
     exactKeys.push("planId");
     if (typeof candidate.planId !== "string" || candidate.planId.length < 1 || candidate.planId.length > 128) {
       throw new Error("DURABLE_AUDIT_INVALID: Invalid bulk plan correlation ID.");
+    }
+  }
+  if ("capability" in candidate) {
+    exactKeys.push("capability");
+    if (typeof candidate.capability !== "string" ||
+        !PROJECT_PERMISSIONS.includes(candidate.capability as (typeof PROJECT_PERMISSIONS)[number])) {
+      throw new Error("DURABLE_AUDIT_INVALID: Invalid authorization capability metadata.");
     }
   }
   if ("relationship" in candidate) {

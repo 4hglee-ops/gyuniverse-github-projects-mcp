@@ -19,7 +19,10 @@ export type WriteOperation =
   | "add_sub_issue"
   | "remove_sub_issue"
   | "add_blocked_by"
-  | "remove_blocked_by";
+  | "remove_blocked_by"
+  | "preview_bulk_plan"
+  | "approve_bulk_plan"
+  | "apply_bulk_plan";
 
 const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
   add_project_item: "item.add",
@@ -33,7 +36,20 @@ const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
   remove_sub_issue: "item.relationship.write",
   add_blocked_by: "item.relationship.write",
   remove_blocked_by: "item.relationship.write",
+  preview_bulk_plan: "bulk.preview",
+  approve_bulk_plan: "bulk.approve",
+  apply_bulk_plan: "bulk.apply",
 };
+
+export function permissionForWriteOperation(operation: WriteOperation): ProjectPermission {
+  return OPERATION_PERMISSION[operation];
+}
+
+export function permissionForAuditOperation(operation: string): ProjectPermission | undefined {
+  return operation in OPERATION_PERMISSION
+    ? OPERATION_PERMISSION[operation as WriteOperation]
+    : undefined;
+}
 
 export interface WritePolicyRequest {
   operation: WriteOperation;
@@ -61,15 +77,15 @@ export class WritePolicy {
 
   authorize(request: WritePolicyRequest): WritePolicyDecision {
     assertProjectWriteAllowed(this.config, request.projectId);
-    const permission = OPERATION_PERMISSION[request.operation];
-    if (permission === "item.relationship.write") {
+    const permission = permissionForWriteOperation(request.operation);
+    if (permission === "item.relationship.write" || permission.startsWith("bulk.")) {
       this.identity.assertPermission(this.principal, permission);
     }
 
     if (this.principal) {
       this.identity.assertProjectMembership(this.principal, request.projectId);
-      this.identity.assertPermission(this.principal, "project.write");
       this.identity.assertPermission(this.principal, permission);
+      this.identity.assertPermission(this.principal, "project.write");
     }
 
     return {

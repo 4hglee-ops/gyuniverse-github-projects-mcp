@@ -6,6 +6,10 @@ import {
 } from "./principal.js";
 
 export class IdentityPolicy {
+  private bounded(value: string): string {
+    return value.slice(0, 256);
+  }
+
   assertPermission(
     principal: AuthenticatedPrincipal | null | undefined,
     permission: ProjectPermission,
@@ -15,7 +19,7 @@ export class IdentityPolicy {
     }
     if (!principalHasPermission(principal, permission)) {
       throw new Error(
-        `PERMISSION_DENIED: Principal '${principal.id}' lacks permission '${permission}'.`,
+        `PERMISSION_DENIED: Principal '${this.bounded(principal.id)}' lacks permission '${permission}'.`,
       );
     }
   }
@@ -29,7 +33,7 @@ export class IdentityPolicy {
     }
     if (!principalHasProject(principal, projectId)) {
       throw new Error(
-        `PROJECT_MEMBERSHIP_DENIED: Principal '${principal.id}' is not assigned to Project '${projectId}'.`,
+        `PROJECT_MEMBERSHIP_DENIED: Principal '${this.bounded(principal.id)}' is not assigned to Project '${this.bounded(projectId)}'.`,
       );
     }
   }
