@@ -213,11 +213,22 @@ Advanced Governance is implemented in bounded slices rather than one large mutat
 - [x] Bounded cycle/precondition checks and fresh normalized reciprocal verification
 - [x] Durable success/no-change/failure audit with bounded relationship metadata
 - [x] Core, HTTP MCP authorization/registration and durable audit regressions
-- [ ] Reviewed Production add/remove/no-change, cleanup and redeploy validation
+- [x] Reviewed Production add/remove/no-change, cleanup and redeploy validation (operator handoff evidence)
+
+### M10-5 Bulk Preview → Approval → Apply
+- [x] Single-Project Status/Priority plans bounded to 20 operations
+- [x] Immutable digest-bound Preview with durable 15-minute plan storage
+- [x] Explicit same-Admin approval with separate creator/approver events
+- [x] Full all-item preflight before the single-use Apply claim
+- [x] Stale/precondition failure guarantees zero plan mutations
+- [x] Verified per-item writes with durable `planId` audit correlation
+- [x] Terminal completed/failed/partial representation; no retry, rollback or resume
+- [x] Local persistence, cross-instance CAS and fail-closed validation regressions
+- [ ] Review and Production validation
 
 ### Remaining
-- [ ] M10-4 review / Production validation and close
-- [ ] M10-5 Bulk Preview -> Approval -> Apply
+- [x] M10-4 review / Production validation and close
+- [ ] M10-5 review / Production validation and close
 - [ ] M10-6 Richer ACL
 - [ ] M10-7 Production validation / milestone close
 

@@ -77,6 +77,12 @@ function parseStoredEntry(value: unknown): WriteAuditEntry {
     "itemId", "operation", "outcome", "projectId", "projectNumber", "projectOwner",
     "requestedValue", "verified",
   ];
+  if ("planId" in candidate) {
+    exactKeys.push("planId");
+    if (typeof candidate.planId !== "string" || candidate.planId.length < 1 || candidate.planId.length > 128) {
+      throw new Error("DURABLE_AUDIT_INVALID: Invalid bulk plan correlation ID.");
+    }
+  }
   if ("relationship" in candidate) {
     exactKeys.push("relationship");
     const relation = candidate.relationship;

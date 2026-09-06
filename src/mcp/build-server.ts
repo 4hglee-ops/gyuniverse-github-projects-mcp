@@ -20,6 +20,9 @@ import { ProjectRelationshipService } from "../core/relationships/project-relati
 import { registerRelationshipTools } from "./relationship-tools.js";
 import { RelationshipWriteService } from "../core/relationships/relationship-write-service.js";
 import { registerRelationshipWriteTools } from "./relationship-write-tools.js";
+import { BulkPlanService } from "../core/bulk/bulk-plan-service.js";
+import { createBulkPlanStore } from "../core/bulk/bulk-plan-store-factory.js";
+import { registerBulkPlanTools } from "./bulk-plan-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -52,6 +55,14 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   registerCheckpointTools({ server, changes: changeService, json });
   registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, principal, json });
   registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, workItems: workItemService, projectIdOf, json });
+  registerBulkPlanTools({
+    server,
+    bulk: new BulkPlanService({
+      client, projects: { resolveProject }, principal, writePolicy, audit: auditService,
+      store: createBulkPlanStore(),
+    }),
+    json,
+  });
 
   server.registerTool(
     "list_github_projects",
