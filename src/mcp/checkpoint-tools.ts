@@ -17,7 +17,7 @@ export function registerCheckpointTools({
   server.registerTool(
     "create_github_project_state_checkpoint",
     {
-      description: "Capture the latest normalized state of an allowed GitHub Project as the process-local baseline for later delta comparison. This does not write to GitHub and replaces only the previous in-memory checkpoint for the same Project.",
+      description: "Capture the latest normalized state of an allowed GitHub Project as the baseline for later delta comparison. In M10 Production this baseline uses the configured durable governance store; local development may remain process-local. This does not write to GitHub.",
       inputSchema: z.object({
         owner: z.string().min(1),
         number: z.number().int().min(1),
@@ -33,7 +33,7 @@ export function registerCheckpointTools({
   server.registerTool(
     "compare_github_project_state_checkpoint",
     {
-      description: "Compare the current normalized state of an allowed GitHub Project with its latest process-local checkpoint without replacing that checkpoint.",
+      description: "Compare the current normalized state of an allowed GitHub Project with its latest stored checkpoint without replacing that checkpoint.",
       inputSchema: z.object({
         owner: z.string().min(1),
         number: z.number().int().min(1),
@@ -48,6 +48,7 @@ export function registerCheckpointTools({
         baseline: result.baseline,
         current: result.current,
         checkpointReplaced: result.checkpointReplaced,
+        persistence: result.persistence,
       });
     },
   );
