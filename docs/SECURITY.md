@@ -70,5 +70,6 @@ Before public production use, also complete:
 - rate limiting
 - secret rotation procedure
 
-Mutation audit records and Project checkpoint baselines remain process-local. Do not treat
-them as durable compliance logs or durable job state in a serverless deployment.
+Mutation audit records and Project checkpoint baselines reuse the Production Upstash
+deployment under isolated namespaces. They are durable operational state, but mutation
+audit remains bounded metadata and must not be treated as a complete compliance archive.

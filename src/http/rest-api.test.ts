@@ -53,6 +53,11 @@ test("action error guidance prevents blind retry for authorization and partial f
   assert.equal(partial.retryable, false);
   assert.match(partial.userAction, /Do not create another Issue automatically/);
 
+  const auditFailure = actionErrorAdvice("AUDIT_PERSISTENCE_FAILED");
+  assert.equal(auditFailure.category, "partial_failure");
+  assert.equal(auditFailure.retryable, false);
+  assert.match(auditFailure.userAction, /Do not retry/);
+
   const ambiguous = actionErrorAdvice("MUTATION_VERIFICATION_FAILED");
   assert.equal(ambiguous.category, "conflict");
   assert.equal(ambiguous.retryable, false);

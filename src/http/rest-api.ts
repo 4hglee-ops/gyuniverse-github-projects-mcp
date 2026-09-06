@@ -86,6 +86,9 @@ export function actionErrorAdvice(code: string): ActionErrorAdvice {
   if (code === "CREATE_WORK_ITEM_PARTIAL_FAILURE") {
     return { category: "partial_failure", retryable: false, userAction: "Do not create another Issue automatically. Inspect the Issue URL from the message and verify Project membership/status before deciding the next action." };
   }
+  if (code === "AUDIT_PERSISTENCE_FAILED") {
+    return { category: "partial_failure", retryable: false, userAction: "Do not retry the write automatically. Re-read the target state and restore durable audit availability before deciding the next action." };
+  }
   if (code === "MUTATION_VERIFICATION_FAILED") {
     return { category: "conflict", retryable: false, userAction: "Re-read the affected Project item before retrying; the mutation result could be ambiguous." };
   }

@@ -36,17 +36,17 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 | `get_github_project_snapshot` | Normalize project state for AI analysis |
 | `analyze_github_project_state_gaps` | Detect missing Status and missing assignee state gaps |
 | `analyze_github_project_reconciliation` | Detect PR merge ↔ Project Status mismatches |
-| `compare_github_project_state_checkpoint` | Compare current Project state with the latest process-local checkpoint |
+| `compare_github_project_state_checkpoint` | Compare current Project state with the latest configured checkpoint |
 | `get_github_project_brief_context` | Return snapshot + team-brief interpretation contract |
-| `list_github_project_write_audit_log` | Read recent bounded process-local write audit metadata |
+| `list_github_project_write_audit_log` | Read recent bounded write audit metadata from the configured governance store |
 
-### Local checkpoint state
+### Checkpoint state
 
 | Tool | Purpose |
 | --- | --- |
-| `create_github_project_state_checkpoint` | Capture the current allowed Project snapshot as the process-local comparison baseline |
+| `create_github_project_state_checkpoint` | Capture the current allowed Project snapshot as the comparison baseline |
 
-Creating a checkpoint **does not write to GitHub**. It updates only MCP process memory, replacing the previous checkpoint for the same owner + Project number. The checkpoint does not survive an MCP server restart.
+Creating a checkpoint **does not write to GitHub**. It replaces the previous checkpoint for the same owner + Project number. Production uses the configured Upstash governance store; local development may use process memory.
 
 A comparison can report Status, Priority, assignee, repository state, merge state, archive state, custom field, metadata, and snapshot-membership changes. Comparison does not silently replace the baseline; create a new checkpoint explicitly when the current state should become the new baseline.
 
@@ -282,9 +282,9 @@ Authorization-code replay prevention is selected by `MCP_OAUTH_REPLAY_STORE`:
 - `upstash`: production shared state using atomic Redis `SET NX` with code expiry
 
 Redis keys contain SHA-256 authorization-code digests rather than bearer code values.
-Vercel and `NODE_ENV=production` runtimes require an explicit store selection and reject
-the memory adapter. Checkpoint baselines and write audit history remain process-local and
-retain their documented restart/lifetime limitations.
+Vercel and `NODE_ENV=production` runtimes require an explicit replay-store selection and
+reject the memory adapter. M10 governance state reuses the same Upstash deployment in
+Production under isolated checkpoint and audit namespaces.
 
 ## Read-only integration smoke test
 
@@ -313,7 +313,7 @@ Later:
 Compare Project #2 with its latest checkpoint and show only what changed.
 ```
 
-Checkpoint storage is intentionally process-local. Persistent storage is a separate architecture decision.
+Checkpoint storage follows `M10_GOVERNANCE_STORE`: Production uses Upstash and local development may use process memory.
 
 ## Guarded write workflow
 
@@ -345,7 +345,7 @@ Use the minimum mutation count necessary to prove behavior, then restore `GITHUB
 
 ## Write audit log
 
-`list_github_project_write_audit_log` exposes the newest process-local write records.
+`list_github_project_write_audit_log` exposes the newest write records from the configured M10 governance store.
 
 Current properties:
 
@@ -357,9 +357,11 @@ Current properties:
 - lower-level writes are recorded without arbitrary raw field payloads
 - tokens, Authorization headers and raw secret values are never stored
 - error records use compact error codes instead of full error response bodies
-- process-local only; entries disappear on restart
+- Production uses Upstash with atomic append-and-trim under an audit-specific namespace
+- local development can use process-local memory fallback
+- malformed durable data and persistence failures fail closed
 
-This is an operational audit aid, not durable compliance logging.
+This is durable operational evidence in Production, not a substitute for an external compliance/SIEM archive.
 
 ## Safety model
 
@@ -455,7 +457,7 @@ src/
 - [x] PR merge ↔ Project status reconciliation
 - [x] project state checkpoint / delta
 - [x] safer high-level Status / Priority mutation tools
-- [x] bounded process-local write audit log
+- [x] bounded write audit log with durable M10 Production persistence
 
 ### M3 — remote MCP ✅
 
@@ -496,9 +498,9 @@ Never commit GitHub tokens, OAuth signing secrets, team codes, or `.env` files.
 
 The client-facing MCP OAuth token and the server-side GitHub credential are separate credentials with separate purposes. OAuth access must never expose or substitute for the GitHub token.
 
-Checkpoint data and write audit records remain process-local. OAuth authorization-code
-replay state is process-local only in development and uses the configured shared Upstash
-store in production.
+Checkpoint data, write audit records, and OAuth authorization-code replay state use
+process-local memory only in development. Production reuses the configured shared Upstash
+deployment with isolated namespaces for each concern.
 
 ## License
 

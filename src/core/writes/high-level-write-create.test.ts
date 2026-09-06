@@ -87,7 +87,7 @@ test("createWorkItem creates Issue, captures Backlog, verifies, and audits actor
   assert.equal(result.capture.status.after?.name, "Backlog");
   assert.equal(createCalls.length, 1);
   assert.equal(captureCalls.length, 1);
-  assert.equal(auditService.list().entries[0]?.operation, "create_work_item");
+  assert.equal((await auditService.list()).entries[0]?.operation, "create_work_item");
 });
 
 test("member cannot create a repository Issue", async () => {

@@ -23,6 +23,34 @@ export interface RecordWriteAuditInput extends Omit<WriteAuditEntry, "id" | "at"
   actorId?: string | null;
 }
 
+function bounded(value: string | null | undefined, maxLength: number): string | null {
+  if (value === null || value === undefined) return null;
+  return value.slice(0, maxLength);
+}
+
+export function createWriteAuditEntry(
+  input: RecordWriteAuditInput,
+  id: string,
+): WriteAuditEntry {
+  return {
+    id: id.slice(0, 128),
+    at: input.at ?? new Date().toISOString(),
+    operation: input.operation.slice(0, 100),
+    outcome: input.outcome,
+    actorId: bounded(input.actorId, 256),
+    projectId: bounded(input.projectId, 256),
+    projectOwner: bounded(input.projectOwner, 256),
+    projectNumber: input.projectNumber,
+    itemId: bounded(input.itemId, 256),
+    fieldName: bounded(input.fieldName, 256),
+    requestedValue: bounded(input.requestedValue, 512),
+    beforeValue: bounded(input.beforeValue, 512),
+    afterValue: bounded(input.afterValue, 512),
+    verified: input.verified,
+    errorCode: bounded(input.errorCode, 128),
+  };
+}
+
 function errorCodeFrom(message: string): string | null {
   const match = /^([A-Z][A-Z0-9_]+):/.exec(message);
   return match?.[1] ?? null;
@@ -52,12 +80,7 @@ export class WriteAuditLog {
   }
 
   record(input: RecordWriteAuditInput): WriteAuditEntry {
-    const entry: WriteAuditEntry = {
-      ...input,
-      actorId: input.actorId ?? null,
-      id: `write-${++this.sequence}`,
-      at: input.at ?? new Date().toISOString(),
-    };
+    const entry = createWriteAuditEntry(input, `write-${++this.sequence}`);
     this.entries.push(entry);
     if (this.entries.length > this.maxEntries) {
       this.entries.splice(0, this.entries.length - this.maxEntries);

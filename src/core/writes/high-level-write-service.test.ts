@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AuditService } from "../audit/audit-service.js";
+import type { WriteAuditStoreLike } from "../audit/audit-store.js";
 import { principalForRole } from "../identity/principal.js";
 import { WritePolicy } from "../policy/write-policy.js";
 import { HighLevelWriteService } from "./high-level-write-service.js";
@@ -77,6 +78,50 @@ test("semantic priority update uses Priority field", async () => {
   assert.equal(calls[0]?.optionName, "P1");
 });
 
+test("a successful mutation does not return success when durable audit persistence fails", async () => {
+  let appendCalls = 0;
+  const failingStore: WriteAuditStoreLike = {
+    persistence: { kind: "upstash", survivesServerRestart: true },
+    async append() {
+      appendCalls += 1;
+      throw new Error("Redis unavailable with sensitive provider diagnostics");
+    },
+    async list() {
+      return [];
+    },
+  };
+  const auditService = new AuditService(200, failingStore);
+  const service = new HighLevelWriteService({
+    client: {} as GitHubGraphQlClient,
+    projects: { async resolveProject() { return { id: "PVT_PROJECT", number: 2, title: "Project" }; } },
+    writePolicy: new WritePolicy(config),
+    auditService,
+    async updateNamedSingleSelect(_client, input) {
+      return {
+        changed: true,
+        verified: true,
+        project: { id: input.projectId, number: input.projectNumber, title: "Project" },
+        itemId: input.itemId,
+        field: { id: "STATUS_FIELD", name: input.fieldName },
+        requestedOption: { id: "DONE", name: input.optionName },
+        before: { id: "TODO", name: "Todo" },
+        after: { id: "DONE", name: input.optionName },
+        mutationSkippedReason: null,
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => service.updateWorkItemStatus("gyuniverse-hq", 2, "PVTI_ITEM", "Done"),
+    (error: Error) => {
+      assert.match(error.message, /^AUDIT_PERSISTENCE_FAILED:/);
+      assert.equal(error.message.includes("sensitive provider diagnostics"), false);
+      return true;
+    },
+  );
+  assert.equal(appendCalls, 1);
+});
+
 test("assignWorkItem is idempotent, verified, actor-aware, and audited", async () => {
   const auditService = new AuditService();
   const principal = principalForRole("user:admin-validation", "admin", { projectIds: ["PVT_PROJECT"] });
@@ -109,7 +154,7 @@ test("assignWorkItem is idempotent, verified, actor-aware, and audited", async (
   assert.equal(result.actorId, "user:admin-validation");
   assert.equal(result.auditId, "write-1");
   assert.deepEqual(calls, [{ projectId: "PVT_PROJECT", itemId: "PVTI_ITEM", assigneeLogin: "4hglee-ops" }]);
-  const entries = auditService.list().entries;
+  const entries = (await auditService.list()).entries;
   assert.equal(entries[0]?.fieldName, "Assignees");
   assert.equal(entries[0]?.requestedValue, "4hglee-ops");
   assert.equal(entries[0]?.outcome, "no_change");
@@ -164,5 +209,5 @@ test("captureBacklog pre-authorizes add and status, then returns actor-aware no_
   assert.equal(result.outcome, "no_change");
   assert.equal(result.actorId, "user:member-validation");
   assert.equal(result.auditId, "write-1");
-  assert.equal(auditService.list().entries[0]?.requestedValue, "Backlog");
+  assert.equal((await auditService.list()).entries[0]?.requestedValue, "Backlog");
 });

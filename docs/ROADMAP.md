@@ -190,10 +190,17 @@ Advanced Governance is implemented in bounded slices rather than one large mutat
 - [x] Preserve explicit/local memory fallback
 - [x] Validate restored baseline across independent service instances in tests
 - [x] Return persistence kind and restart-survival metadata
+- [x] Production cross-request/redeploy validation
+
+### M10-2 Durable write audit
+- [x] Replace direct process-local audit ownership with a storage abstraction
+- [x] Reuse the governance Upstash deployment under an isolated audit namespace
+- [x] Preserve bounded newest-first retention and Project/item filters
+- [x] Fail closed on malformed stored payloads and audit persistence failures
+- [x] Cover memory, cross-instance restore, ordering, retention, filtering, and secret exclusion
 - [ ] Production cross-request/redeploy validation
 
 ### Remaining
-- [ ] M10-2 Durable write audit
 - [ ] M10-3 Dependency / sub-issue evidence reads
 - [ ] M10-4 Guarded relationship writes
 - [ ] M10-5 Bulk Preview -> Approval -> Apply

@@ -20,38 +20,39 @@ function successEntry() {
   };
 }
 
-test("AuditService owns bounded process-local write history", () => {
+test("AuditService owns bounded process-local write history", async () => {
   const audit = new AuditService(2);
-  const first = audit.record(successEntry());
-  audit.record({ ...successEntry(), itemId: "PVTI_second" });
-  audit.record({ ...successEntry(), itemId: "PVTI_third" });
+  const first = await audit.record(successEntry());
+  await audit.record({ ...successEntry(), itemId: "PVTI_second" });
+  await audit.record({ ...successEntry(), itemId: "PVTI_third" });
 
-  const result = audit.list();
+  const result = await audit.list();
   assert.equal(result.persistence, "process-local");
+  assert.equal(result.survivesServerRestart, false);
   assert.equal(result.entries.length, 2);
   assert.equal(result.entries[0]?.itemId, "PVTI_third");
   assert.equal(result.entries[1]?.itemId, "PVTI_second");
   assert.match(first.id, /^write-1$/);
 });
 
-test("AuditService preserves filtering semantics", () => {
+test("AuditService preserves filtering semantics", async () => {
   const audit = new AuditService();
-  audit.record(successEntry());
-  audit.record({ ...successEntry(), projectId: "PVT_other", itemId: "PVTI_other" });
+  await audit.record(successEntry());
+  await audit.record({ ...successEntry(), projectId: "PVT_other", itemId: "PVTI_other" });
 
   assert.deepEqual(
-    audit.list({ projectId: "PVT_allowed" }).entries.map((entry) => entry.projectId),
+    (await audit.list({ projectId: "PVT_allowed" })).entries.map((entry) => entry.projectId),
     ["PVT_allowed"],
   );
   assert.deepEqual(
-    audit.list({ itemId: "PVTI_other" }).entries.map((entry) => entry.itemId),
+    (await audit.list({ itemId: "PVTI_other" })).entries.map((entry) => entry.itemId),
     ["PVTI_other"],
   );
 });
 
-test("AuditService normalizes failure error codes", () => {
+test("AuditService normalizes failure error codes", async () => {
   const audit = new AuditService();
-  const entry = audit.recordFailure(
+  const entry = await audit.recordFailure(
     {
       operation: "update_status",
       projectId: "PVT_allowed",

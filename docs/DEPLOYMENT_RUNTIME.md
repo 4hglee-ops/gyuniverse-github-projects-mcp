@@ -41,4 +41,4 @@ selected, or when Redis is unavailable.
 - single Node runtime: supported
 - Vercel Functions: adapter and shared-store implementation complete; provisioning pending
 - multi-instance OAuth replay semantics: supported with Upstash Redis
-- checkpoint baselines and write audit history: still process-local
+- checkpoint baselines and bounded write audit history: durable with the shared Upstash deployment under isolated namespaces
