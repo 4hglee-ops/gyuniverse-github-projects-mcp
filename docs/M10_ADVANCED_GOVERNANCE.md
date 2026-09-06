@@ -171,4 +171,8 @@ This follow-up does not block M10-6 completion.
 - [x] M10-5 review / Production validation
 - [x] M10-6 richer ACL implementation and regression coverage
 - [x] M10-6 review / Production validation
-- [ ] M10-7 final validation / close
+- [x] M10-7 final validation / close
+
+M10 Advanced Governance is complete. Final Production health, cleanup, durability,
+security-regression, deferred-validation, and operating evidence is recorded in
+[M10 closeout](M10_CLOSEOUT.md). No M11 work is included.
