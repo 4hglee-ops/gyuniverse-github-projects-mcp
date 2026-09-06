@@ -10,12 +10,14 @@ import type {
 
 export type WriteOperation =
   | "add_project_item"
+  | "assign_work_item"
   | "update_project_item_field"
   | "update_status"
   | "update_priority";
 
 const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
   add_project_item: "item.add",
+  assign_work_item: "item.assign",
   update_project_item_field: "item.update_field",
   update_status: "item.update_status",
   update_priority: "item.update_priority",

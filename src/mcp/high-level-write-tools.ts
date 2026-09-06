@@ -51,4 +51,16 @@ export function registerHighLevelWriteTools({ server, writes, json }: RegisterHi
       await writes.startWork(owner, number, itemId),
     ),
   );
+
+  server.registerTool(
+    "assign_work_item",
+    {
+      description: "Assign a GitHub user to the Issue or Pull Request represented by one authorized Project item. Admin/PM only in the current policy. Resolves the login, skips an already-assigned user, verifies the assignment, and returns actor-aware audit metadata.",
+      inputSchema: targetInput.extend({ assigneeLogin: z.string().min(1) }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ owner, number, itemId, assigneeLogin }) => json(
+      await writes.assignWorkItem(owner, number, itemId, assigneeLogin),
+    ),
+  );
 }

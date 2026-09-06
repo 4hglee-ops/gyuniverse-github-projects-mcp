@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { AuditService } from "../audit/audit-service.js";
+import { principalForRole } from "../identity/principal.js";
 import { WritePolicy } from "../policy/write-policy.js";
 import { HighLevelWriteService } from "./high-level-write-service.js";
 import type { AppConfig } from "../../config.js";
@@ -80,4 +81,51 @@ test("semantic priority update uses Priority field", async () => {
   assert.equal(result.operation, "update_priority");
   assert.equal(calls[0]?.fieldName, "Priority");
   assert.equal(calls[0]?.optionName, "P1");
+});
+
+test("assignWorkItem is idempotent, verified, actor-aware, and audited", async () => {
+  const auditService = new AuditService();
+  const principal = principalForRole("user:admin-validation", "admin", {
+    projectIds: ["PVT_PROJECT"],
+  });
+  const calls: Array<{ projectId: string; itemId: string; assigneeLogin: string }> = [];
+  const service = new HighLevelWriteService({
+    client: {} as GitHubGraphQlClient,
+    projects: {
+      async resolveProject() {
+        return { id: "PVT_PROJECT", number: 2, title: "Bid Change Validator · WBS" };
+      },
+    },
+    writePolicy: new WritePolicy(config, principal),
+    auditService,
+    async assignWorkItem(_client, input) {
+      calls.push(input);
+      return {
+        changed: false,
+        verified: true,
+        project: { id: input.projectId, number: 2, title: "Bid Change Validator · WBS" },
+        itemId: input.itemId,
+        content: { id: "ISSUE_NODE", type: "Issue" as const },
+        requestedAssignee: { id: "USER_NODE", login: input.assigneeLogin },
+        before: [{ id: "USER_NODE", login: input.assigneeLogin }],
+        after: [{ id: "USER_NODE", login: input.assigneeLogin }],
+        mutationSkippedReason: "already_assigned" as const,
+      };
+    },
+  });
+
+  const result = await service.assignWorkItem("gyuniverse-hq", 2, "PVTI_ITEM", "4hglee-ops");
+
+  assert.equal(result.changed, false);
+  assert.equal(result.verified, true);
+  assert.equal(result.operation, "assign_work_item");
+  assert.equal(result.outcome, "no_change");
+  assert.equal(result.actorId, "user:admin-validation");
+  assert.equal(result.auditId, "write-1");
+  assert.deepEqual(calls, [{ projectId: "PVT_PROJECT", itemId: "PVTI_ITEM", assigneeLogin: "4hglee-ops" }]);
+
+  const entries = auditService.list().entries;
+  assert.equal(entries[0]?.fieldName, "Assignees");
+  assert.equal(entries[0]?.requestedValue, "4hglee-ops");
+  assert.equal(entries[0]?.outcome, "no_change");
 });

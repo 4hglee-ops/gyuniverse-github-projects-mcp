@@ -63,7 +63,7 @@ test("viewer cannot invoke write operations when a principal is enforced", () =>
   );
 });
 
-test("member can update status but cannot use generic field mutation", () => {
+test("member can update status but cannot use generic field or assignment mutation", () => {
   const policy = new WritePolicy(config(), principal("member-1", "member"));
   const decision = policy.authorize({ operation: "update_status", projectId: "PVT_allowed" });
   assert.equal(decision.actorId, "member-1");
@@ -76,11 +76,18 @@ test("member can update status but cannot use generic field mutation", () => {
     () => policy.authorize({ operation: "update_project_item_field", projectId: "PVT_allowed" }),
     /PERMISSION_DENIED/,
   );
+  assert.throws(
+    () => policy.authorize({ operation: "assign_work_item", projectId: "PVT_allowed" }),
+    /PERMISSION_DENIED/,
+  );
 });
 
-test("admin retains the current generic write surface", () => {
+test("admin retains generic field and assignment write surfaces", () => {
   const policy = new WritePolicy(config(), principal("admin-1", "admin"));
   assert.doesNotThrow(() =>
     policy.authorize({ operation: "update_project_item_field", projectId: "PVT_allowed" }),
   );
+  const assignment = policy.authorize({ operation: "assign_work_item", projectId: "PVT_allowed" });
+  assert.equal(assignment.permission, "item.assign");
+  assert.equal(assignment.actorId, "admin-1");
 });

@@ -3,6 +3,10 @@ import { WritePolicy, type WriteOperation } from "../policy/write-policy.js";
 import { projectIdOf } from "../projects/project-service.js";
 import { GitHubGraphQlClient } from "../../github/graphql-client.js";
 import {
+  assignProjectWorkItem,
+  type AssignWorkItemResult,
+} from "../../workflow/assignee-update.js";
+import {
   updateProjectSingleSelectByName,
   type NamedSingleSelectUpdateResult,
 } from "../../workflow/single-select-update.js";
@@ -12,6 +16,7 @@ export interface HighLevelWriteProjectReader {
 }
 
 type NamedSingleSelectUpdater = typeof updateProjectSingleSelectByName;
+type WorkItemAssigner = typeof assignProjectWorkItem;
 
 export interface HighLevelWriteServiceOptions {
   client: GitHubGraphQlClient;
@@ -19,15 +24,19 @@ export interface HighLevelWriteServiceOptions {
   writePolicy: WritePolicy;
   auditService: AuditService;
   updateNamedSingleSelect?: NamedSingleSelectUpdater;
+  assignWorkItem?: WorkItemAssigner;
 }
 
-export interface HighLevelWriteResult extends NamedSingleSelectUpdateResult {
+interface AuditEnvelope {
   auditId: string;
   actorId: string | null;
   operation: WriteOperation;
   outcome: "success" | "no_change";
   auditPersistence: "process-local";
 }
+
+export interface HighLevelWriteResult extends NamedSingleSelectUpdateResult, AuditEnvelope {}
+export interface HighLevelAssignResult extends AssignWorkItemResult, AuditEnvelope {}
 
 interface NamedUpdateInput {
   owner: string;
@@ -38,18 +47,25 @@ interface NamedUpdateInput {
   operation: "update_status" | "update_priority";
 }
 
+function logins(value: Array<{ login: string }>): string | null {
+  const entries = value.map((item) => item.login).sort((a, b) => a.localeCompare(b));
+  return entries.length > 0 ? entries.join(",") : null;
+}
+
 /**
  * Semantic Shared Core write orchestration.
  *
- * Transport adapters provide intent-level inputs (Status/Priority/start work). This
- * service owns Project resolution, authorization, idempotent mutation, verification,
- * and actor-aware audit so MCP and future REST adapters share identical behavior.
+ * Transport adapters provide intent-level inputs. This service owns Project
+ * resolution, authorization, idempotent mutation, verification, and actor-aware
+ * audit so MCP and future REST adapters share identical behavior.
  */
 export class HighLevelWriteService {
   private readonly updateNamedSingleSelect: NamedSingleSelectUpdater;
+  private readonly assignProjectWorkItem: WorkItemAssigner;
 
   constructor(private readonly options: HighLevelWriteServiceOptions) {
     this.updateNamedSingleSelect = options.updateNamedSingleSelect ?? updateProjectSingleSelectByName;
+    this.assignProjectWorkItem = options.assignWorkItem ?? assignProjectWorkItem;
   }
 
   async updateWorkItemStatus(
@@ -86,6 +102,64 @@ export class HighLevelWriteService {
 
   async startWork(owner: string, number: number, itemId: string): Promise<HighLevelWriteResult> {
     return this.updateWorkItemStatus(owner, number, itemId, "In Progress");
+  }
+
+  async assignWorkItem(
+    owner: string,
+    number: number,
+    itemId: string,
+    assigneeLogin: string,
+  ): Promise<HighLevelAssignResult> {
+    const project = await this.options.projects.resolveProject(owner, number);
+    const projectId = projectIdOf(project);
+    const decision = this.options.writePolicy.authorize({ operation: "assign_work_item", projectId });
+
+    try {
+      const result = await this.assignProjectWorkItem(this.options.client, {
+        projectId,
+        itemId,
+        assigneeLogin,
+      });
+      const outcome = result.changed ? "success" : "no_change";
+      const audit = this.options.auditService.record({
+        operation: "assign_work_item",
+        outcome,
+        actorId: decision.actorId,
+        projectId,
+        projectOwner: owner,
+        projectNumber: number,
+        itemId,
+        fieldName: "Assignees",
+        requestedValue: result.requestedAssignee.login,
+        beforeValue: logins(result.before),
+        afterValue: logins(result.after),
+        verified: result.verified,
+        errorCode: null,
+      });
+
+      return {
+        ...result,
+        auditId: audit.id,
+        actorId: audit.actorId,
+        operation: "assign_work_item",
+        outcome,
+        auditPersistence: "process-local",
+      };
+    } catch (error) {
+      this.options.auditService.recordFailure({
+        operation: "assign_work_item",
+        actorId: decision.actorId,
+        projectId,
+        projectOwner: owner,
+        projectNumber: number,
+        itemId,
+        fieldName: "Assignees",
+        requestedValue: assigneeLogin,
+        beforeValue: null,
+        afterValue: null,
+      }, error);
+      throw error;
+    }
   }
 
   private async runNamedUpdate(input: NamedUpdateInput): Promise<HighLevelWriteResult> {
