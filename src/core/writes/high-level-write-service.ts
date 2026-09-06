@@ -1,4 +1,4 @@
-import { AuditService } from "../audit/audit-service.js";
+import { AuditService, isAuditPersistenceFailure } from "../audit/audit-service.js";
 import { WritePolicy, type WriteOperation } from "../policy/write-policy.js";
 import { projectIdOf } from "../projects/project-service.js";
 import { GitHubGraphQlClient } from "../../github/graphql-client.js";
@@ -47,7 +47,7 @@ interface AuditEnvelope {
   actorId: string | null;
   operation: WriteOperation;
   outcome: "success" | "no_change";
-  auditPersistence: "process-local";
+  auditPersistence: "process-local" | "upstash";
 }
 
 export interface HighLevelWriteResult extends NamedSingleSelectUpdateResult, AuditEnvelope {}
@@ -147,7 +147,7 @@ export class HighLevelWriteService {
         assigneeLogin,
       });
       const outcome = result.changed ? "success" : "no_change";
-      const audit = this.options.auditService.record({
+      const audit = await this.options.auditService.record({
         operation: "assign_work_item",
         outcome,
         actorId: decision.actorId,
@@ -169,10 +169,11 @@ export class HighLevelWriteService {
         actorId: audit.actorId,
         operation: "assign_work_item",
         outcome,
-        auditPersistence: "process-local",
+        auditPersistence: this.options.auditService.persistence,
       };
     } catch (error) {
-      this.options.auditService.recordFailure({
+      if (isAuditPersistenceFailure(error)) throw error;
+      await this.options.auditService.recordFailure({
         operation: "assign_work_item",
         actorId: decision.actorId,
         projectId,
@@ -210,7 +211,7 @@ export class HighLevelWriteService {
         { owner, projectNumber: number, projectId, url },
       );
       const outcome = result.changed ? "success" : "no_change";
-      const audit = this.options.auditService.record({
+      const audit = await this.options.auditService.record({
         operation: "capture_backlog",
         outcome,
         actorId: addDecision.actorId,
@@ -232,10 +233,11 @@ export class HighLevelWriteService {
         actorId: audit.actorId,
         operation: "capture_backlog",
         outcome,
-        auditPersistence: "process-local",
+        auditPersistence: this.options.auditService.persistence,
       };
     } catch (error) {
-      this.options.auditService.recordFailure({
+      if (isAuditPersistenceFailure(error)) throw error;
+      await this.options.auditService.recordFailure({
         operation: "capture_backlog",
         actorId: addDecision.actorId,
         projectId,
@@ -285,7 +287,7 @@ export class HighLevelWriteService {
         throw new Error("MUTATION_VERIFICATION_FAILED: Created Issue was not verified in Backlog.");
       }
 
-      const audit = this.options.auditService.record({
+      const audit = await this.options.auditService.record({
         operation: "create_work_item",
         outcome: "success",
         actorId: createDecision.actorId,
@@ -310,10 +312,11 @@ export class HighLevelWriteService {
         actorId: audit.actorId,
         operation: "create_work_item",
         outcome: "success",
-        auditPersistence: "process-local",
+        auditPersistence: this.options.auditService.persistence,
       };
     } catch (error) {
-      this.options.auditService.recordFailure({
+      if (isAuditPersistenceFailure(error)) throw error;
+      await this.options.auditService.recordFailure({
         operation: "create_work_item",
         actorId: createDecision.actorId,
         projectId,
@@ -348,7 +351,7 @@ export class HighLevelWriteService {
       });
 
       const outcome = result.changed ? "success" : "no_change";
-      const audit = this.options.auditService.record({
+      const audit = await this.options.auditService.record({
         operation: input.operation,
         outcome,
         actorId: decision.actorId,
@@ -370,10 +373,11 @@ export class HighLevelWriteService {
         actorId: audit.actorId,
         operation: input.operation,
         outcome,
-        auditPersistence: "process-local",
+        auditPersistence: this.options.auditService.persistence,
       };
     } catch (error) {
-      this.options.auditService.recordFailure({
+      if (isAuditPersistenceFailure(error)) throw error;
+      await this.options.auditService.recordFailure({
         operation: input.operation,
         actorId: decision.actorId,
         projectId,

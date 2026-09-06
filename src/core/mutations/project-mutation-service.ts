@@ -1,4 +1,4 @@
-import { AuditService } from "../audit/audit-service.js";
+import { AuditService, isAuditPersistenceFailure } from "../audit/audit-service.js";
 import { WritePolicy } from "../policy/write-policy.js";
 import { GitHubGraphQlClient } from "../../github/graphql-client.js";
 import {
@@ -28,7 +28,7 @@ export class ProjectMutationService {
 
     try {
       const result = await addItemToProject(this.options.client, projectId, contentId);
-      this.options.auditService.record({
+      await this.options.auditService.record({
         operation: "add_project_item",
         outcome: "success",
         actorId: decision.actorId,
@@ -45,7 +45,8 @@ export class ProjectMutationService {
       });
       return result;
     } catch (error) {
-      this.options.auditService.recordFailure({
+      if (isAuditPersistenceFailure(error)) throw error;
+      await this.options.auditService.recordFailure({
         operation: "add_project_item",
         actorId: decision.actorId,
         projectId,
@@ -77,7 +78,7 @@ export class ProjectMutationService {
         fieldId,
         value,
       );
-      this.options.auditService.record({
+      await this.options.auditService.record({
         operation: "update_project_item_field",
         outcome: "success",
         actorId: decision.actorId,
@@ -94,7 +95,8 @@ export class ProjectMutationService {
       });
       return result;
     } catch (error) {
-      this.options.auditService.recordFailure({
+      if (isAuditPersistenceFailure(error)) throw error;
+      await this.options.auditService.recordFailure({
         operation: "update_project_item_field",
         actorId: decision.actorId,
         projectId,

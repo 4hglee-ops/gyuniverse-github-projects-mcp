@@ -43,7 +43,7 @@ test("addProjectItem authorizes, mutates, and records actor-aware audit", async 
 
   const result = await service.addProjectItem("PVT_allowed", "I_1") as { id: string };
   assert.equal(result.id, "PVTI_1");
-  const entries = audit.list().entries;
+  const entries = (await audit.list()).entries;
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.operation, "add_project_item");
   assert.equal(entries[0]?.outcome, "success");
@@ -84,7 +84,7 @@ test("mutation failures are normalized into shared audit records", async () => {
     () => service.updateProjectItemField("PVT_allowed", "PVTI_1", "PVTF_1", { text: "x" }),
     /synthetic mutation failure/,
   );
-  const [entry] = audit.list().entries;
+  const [entry] = (await audit.list()).entries;
   assert.equal(entry?.outcome, "failed");
   assert.equal(entry?.errorCode, "WRITE_FAILED");
   assert.equal(entry?.actorId, null);

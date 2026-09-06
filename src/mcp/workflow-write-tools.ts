@@ -70,10 +70,10 @@ export function registerWorkflowWriteTools(options: RegisterWorkflowWriteToolsOp
   options.server.registerTool(
     "list_github_project_write_audit_log",
     {
-      description: "List recent in-process GitHub Project write audit records. Records contain bounded operation metadata, actor identity, and verification results, not tokens or raw mutation payloads. On serverless deployments this process-local history is best-effort because later requests may reach a different instance; the write response itself includes the authoritative bounded audit summary for that operation.",
+      description: "List recent bounded GitHub Project write audit records. Production uses the configured durable M10 governance store; local development may remain process-local. Records contain metadata, actor identity, and verification results, not tokens or raw mutation payloads.",
       inputSchema: z.object({ limit: z.number().int().min(1).max(200).default(50), projectId: z.string().min(1).optional(), itemId: z.string().min(1).optional() }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ limit, projectId, itemId }) => options.json(options.auditService.list({ limit, projectId, itemId })),
+    async ({ limit, projectId, itemId }) => options.json(await options.auditService.list({ limit, projectId, itemId })),
   );
 }

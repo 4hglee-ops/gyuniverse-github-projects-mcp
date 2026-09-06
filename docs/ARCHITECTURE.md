@@ -79,7 +79,7 @@ src/workflow/
 ├── reconciliation.ts        # PR merge ↔ Project Status analysis
 ├── state-gaps.ts            # missing Status / assignee analysis
 ├── single-select-update.ts  # guarded named Status/Priority update core
-└── write-audit.ts           # bounded process-local mutation audit metadata
+└── write-audit.ts           # bounded mutation audit metadata schema
 ```
 
 ## Remote HTTP / OAuth layers
@@ -246,16 +246,14 @@ uses atomic Redis `SET NX` with the signed code expiry, providing shared one-tim
 across Vercel Function instances. Production rejects the memory implementation and does
 not silently fall back when Redis is unavailable.
 
-## Process-local operational state
+## Governance operational state
 
-The following are currently process-local:
+The following use the configured M10 governance persistence boundary:
 
 - Project checkpoint baselines
 - write audit entries
 
-OAuth authorization-code replay state is shared through Upstash in production.
-
-Checkpoint and audit loss on restart is an accepted current product limitation. Persistent checkpoint / audit are explicitly planned in the V2 roadmap before they are treated as authoritative history.
+Local development defaults to process memory. Production reuses the OAuth replay Upstash deployment with isolated checkpoint and audit key namespaces. Audit append and bounded retention are atomic, and malformed durable data fails closed.
 
 ## Design principles
 
@@ -271,7 +269,7 @@ Checkpoint and audit loss on restart is an accepted current product limitation. 
 10. **High-level workflow writes are preferred**: Status/Priority tools resolve exact field/option names internally instead of asking the model to supply raw field/option node IDs.
 11. **Verify writes**: high-level Status/Priority writes validate item→Project membership before mutation and re-read the field after mutation.
 12. **No-op before mutation**: if the requested Status/Priority is already set, the high-level path skips the mutation.
-13. **Bounded audit metadata**: process-local write audit records operation/target/outcome/verification metadata without storing tokens, Authorization headers, or arbitrary raw mutation payloads.
+13. **Bounded audit metadata**: durable Production write audit records operation/target/outcome/verification metadata without storing tokens, Authorization headers, or arbitrary raw mutation payloads.
 14. **Provider-neutral remote core**: OAuth and MCP authorization semantics live outside any hosting adapter.
 15. **Fail closed on deployment uncertainty**: multi-instance replay semantics must be solved explicitly before claiming production-safe distributed OAuth deployment.
 16. **Shared-Core V2**: MCP and REST/GPT Actions should be sibling adapters over one business-logic core, never chained transports.
@@ -290,7 +288,7 @@ Checkpoint and audit loss on restart is an accepted current product limitation. 
 - `get_github_project_snapshot`
 - `analyze_github_project_state_gaps`
 - `analyze_github_project_reconciliation`
-- `create_github_project_state_checkpoint` (process-local state only; no GitHub mutation)
+- `create_github_project_state_checkpoint` (configured governance state only; no GitHub mutation)
 - `compare_github_project_state_checkpoint`
 - `get_github_project_brief_context`
 - `list_github_project_write_audit_log`
@@ -311,7 +309,7 @@ Lower-level compatibility tools:
 
 - normalized snapshot-wide analysis is still bounded by the first 100 returned Project items; the pagination-aware single-item resolver is exhaustive within configured page limits
 - real write integration tests require an intentionally write-capable GitHub credential, explicit Project allowlist, and write gate; CI remains secret-free and does not run write smoke tests
-- checkpoint and write-audit state remain process-local even though OAuth replay state is shared
+- checkpoint and write-audit state are durable with Upstash in Production and process-local in the explicit development fallback
 - individual user identity / ACL is not implemented yet; `MCP_OAUTH_TEAM_CODE` remains a shared approval gate
 - Project #2 operating fields/views/native automations are the next milestone
 - Draft PR → Ready for review, merge, release, actual deployment, credential provisioning, and external auth-provider adoption remain human-governance / architecture boundaries
