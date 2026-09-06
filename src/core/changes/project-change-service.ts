@@ -6,10 +6,8 @@ import {
   type ProjectStateComparison,
   type ProjectStateDelta,
 } from "../../workflow/checkpoint.js";
-import {
-  MemoryProjectCheckpointStore,
-  type ProjectCheckpointStoreLike,
-} from "./checkpoint-store.js";
+import { createProjectCheckpointStore } from "./checkpoint-store-factory.js";
+import type { ProjectCheckpointStoreLike } from "./checkpoint-store.js";
 
 export interface ChangeReadOptions {
   first?: number;
@@ -70,7 +68,7 @@ function grouped(comparison: ProjectStateComparison | null): ProjectChangesResul
 export class ProjectChangeService {
   constructor(
     private readonly snapshots: SnapshotService,
-    private readonly checkpoints: ProjectCheckpointStoreLike = new MemoryProjectCheckpointStore(),
+    private readonly checkpoints: ProjectCheckpointStoreLike = createProjectCheckpointStore(),
   ) {}
 
   async captureBaseline(owner: string, number: number, first = 100) {
