@@ -146,7 +146,7 @@ export function registerHighLevelReadTools({
   server.registerTool(
     "get_project_changes",
     {
-      description: "Compare the current Project snapshot with the shared process-local baseline and return semantic change groups without replacing the baseline. Can initialize a missing baseline explicitly.",
+      description: "Compare the current Project snapshot with the latest configured checkpoint baseline and return semantic change groups without replacing that baseline. Production may use durable M10 persistence; local development may remain process-local. Can initialize a missing baseline explicitly.",
       inputSchema: z.object({
         owner: z.string().min(1),
         number: z.number().int().min(1),
