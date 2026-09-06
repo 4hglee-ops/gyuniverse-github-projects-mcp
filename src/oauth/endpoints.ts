@@ -29,6 +29,7 @@ import {
 
 import { createOAuthReplayStore } from "./replay-store-factory.js";
 import { OAuthReplayStore } from "./replay-store.js";
+import { logRegistrationRejection } from "./registration-diagnostic.js";
 
 interface RegistrationRequest {
   client_name?: string;
@@ -107,11 +108,14 @@ export async function registerOAuthClient(request: Request): Promise<Response> {
   try {
     body = (await request.json()) as RegistrationRequest;
   } catch {
+    logRegistrationRejection("json_parse_failed");
     return noStoreJson({ error: "invalid_client_metadata" }, { status: 400 });
   }
 
   const redirectUris = Array.isArray(body.redirect_uris) ? body.redirect_uris : [];
   if (redirectUris.length === 0 || !redirectUris.every(isAllowedRedirectUri)) {
+    logRegistrationRejection(redirectUris.length === 0
+      ? "redirect_uris_missing_or_invalid" : "redirect_uri_not_allowed", body);
     return noStoreJson(
       { error: "invalid_redirect_uri", error_description: "Unsupported redirect URI." },
       { status: 400 },
@@ -119,6 +123,7 @@ export async function registerOAuthClient(request: Request): Promise<Response> {
   }
 
   if (body.token_endpoint_auth_method && body.token_endpoint_auth_method !== "none") {
+    logRegistrationRejection("unsupported_token_endpoint_auth_method", body);
     return noStoreJson(
       { error: "invalid_client_metadata", error_description: "Dynamic registration supports public PKCE clients only." },
       { status: 400 },
@@ -127,12 +132,15 @@ export async function registerOAuthClient(request: Request): Promise<Response> {
 
   const requestedGrants = body.grant_types ?? ["authorization_code", "refresh_token"];
   if (requestedGrants.some((grant) => grant !== "authorization_code" && grant !== "refresh_token")) {
+    logRegistrationRejection("unsupported_grant_type", body);
     return noStoreJson({ error: "invalid_client_metadata" }, { status: 400 });
   }
   if (!requestedGrants.includes("authorization_code")) {
+    logRegistrationRejection("authorization_code_missing", body);
     return noStoreJson({ error: "invalid_client_metadata" }, { status: 400 });
   }
   if (body.response_types?.some((type) => type !== "code")) {
+    logRegistrationRejection("unsupported_response_type", body);
     return noStoreJson({ error: "invalid_client_metadata" }, { status: 400 });
   }
 
