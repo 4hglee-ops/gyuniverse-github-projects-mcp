@@ -1,6 +1,6 @@
 # Temporary OAuth DCR rejection diagnostics
 
-Purpose: identify which existing `/oauth/register` rejection branch rejects a real hosted connector request. This patch does not fix or change OAuth compatibility.
+Purpose: identify which existing `/oauth/register` rejection branch rejects a real hosted connector request. The instrumentation itself does not change OAuth behavior. The subsequent public-client negotiation change is documented in [OAuth DCR public-client negotiation](OAUTH_DCR_PUBLIC_CLIENT_NEGOTIATION.md).
 
 ## Exact log schema
 
@@ -16,7 +16,7 @@ Purpose: identify which existing `/oauth/register` rejection branch rejects a re
 | `json_parse_failed` | JSON body parsing failed; field list is empty |
 | `redirect_uris_missing_or_invalid` | Redirect list is absent, non-array, or empty |
 | `redirect_uri_not_allowed` | At least one redirect entry fails the existing allowlist |
-| `unsupported_token_endpoint_auth_method` | Truthy auth method other than exact `none` |
+| `unsupported_token_endpoint_auth_method` | Truthy auth method other than exact `none`, `client_secret_basic`, or `client_secret_post`; the latter two are negotiated to effective `none` |
 | `unsupported_grant_type` | A grant is neither `authorization_code` nor `refresh_token` |
 | `authorization_code_missing` | Grant list does not include `authorization_code` |
 | `unsupported_response_type` | A response type is not exact `code` |
@@ -36,7 +36,7 @@ No request bodies, redirect values, client IDs/secrets, authorization codes, tok
 
 ## Behavior preservation and deferred hardening
 
-Validation predicates, evaluation order, accepted metadata, status codes, response JSON, and cache headers are unchanged. No CSP, discovery, redirect allowlist, token exchange, access-code authentication, relationship tools, or permission changes are included.
+The original diagnostics-only patch preserved validation predicates, evaluation order, accepted metadata, status codes, response JSON, and cache headers. The subsequent compatibility patch only expands accepted auth-method requests as described above and records effective `none`. No CSP, discovery, redirect allowlist, token exchange, access-code authentication, relationship tools, or permission changes are included.
 
 JSON `null`, string grant/response lists, and numeric client names can currently throw TypeError. Converting those exceptions into deliberate 400s would change existing failure behavior. That hardening is deliberately deferred to a separate reviewed change; `malformed_metadata_type` is not emitted by this PR. Characterization tests preserve the current behavior.
 
