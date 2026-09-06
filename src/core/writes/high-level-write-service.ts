@@ -7,6 +7,11 @@ import {
   type AssignWorkItemResult,
 } from "../../workflow/assignee-update.js";
 import {
+  captureProjectBacklogItem,
+  type CaptureBacklogResult,
+  type CaptureBacklogWorkItemReader,
+} from "../../workflow/capture-backlog.js";
+import {
   updateProjectSingleSelectByName,
   type NamedSingleSelectUpdateResult,
 } from "../../workflow/single-select-update.js";
@@ -17,14 +22,17 @@ export interface HighLevelWriteProjectReader {
 
 type NamedSingleSelectUpdater = typeof updateProjectSingleSelectByName;
 type WorkItemAssigner = typeof assignProjectWorkItem;
+type BacklogCapturer = typeof captureProjectBacklogItem;
 
 export interface HighLevelWriteServiceOptions {
   client: GitHubGraphQlClient;
   projects: HighLevelWriteProjectReader;
+  workItems?: CaptureBacklogWorkItemReader;
   writePolicy: WritePolicy;
   auditService: AuditService;
   updateNamedSingleSelect?: NamedSingleSelectUpdater;
   assignWorkItem?: WorkItemAssigner;
+  captureBacklog?: BacklogCapturer;
 }
 
 interface AuditEnvelope {
@@ -37,6 +45,7 @@ interface AuditEnvelope {
 
 export interface HighLevelWriteResult extends NamedSingleSelectUpdateResult, AuditEnvelope {}
 export interface HighLevelAssignResult extends AssignWorkItemResult, AuditEnvelope {}
+export interface HighLevelCaptureBacklogResult extends CaptureBacklogResult, AuditEnvelope {}
 
 interface NamedUpdateInput {
   owner: string;
@@ -62,10 +71,12 @@ function logins(value: Array<{ login: string }>): string | null {
 export class HighLevelWriteService {
   private readonly updateNamedSingleSelect: NamedSingleSelectUpdater;
   private readonly assignProjectWorkItem: WorkItemAssigner;
+  private readonly captureProjectBacklogItem: BacklogCapturer;
 
   constructor(private readonly options: HighLevelWriteServiceOptions) {
     this.updateNamedSingleSelect = options.updateNamedSingleSelect ?? updateProjectSingleSelectByName;
     this.assignProjectWorkItem = options.assignWorkItem ?? assignProjectWorkItem;
+    this.captureProjectBacklogItem = options.captureBacklog ?? captureProjectBacklogItem;
   }
 
   async updateWorkItemStatus(
@@ -155,6 +166,70 @@ export class HighLevelWriteService {
         itemId,
         fieldName: "Assignees",
         requestedValue: assigneeLogin,
+        beforeValue: null,
+        afterValue: null,
+      }, error);
+      throw error;
+    }
+  }
+
+  async captureBacklog(
+    owner: string,
+    number: number,
+    url: string,
+  ): Promise<HighLevelCaptureBacklogResult> {
+    if (!this.options.workItems) {
+      throw new Error("CAPTURE_BACKLOG_NOT_CONFIGURED: Work item resolver is unavailable.");
+    }
+
+    const project = await this.options.projects.resolveProject(owner, number);
+    const projectId = projectIdOf(project);
+
+    // Fail before the first mutation unless the principal may both add an item and set Status.
+    const addDecision = this.options.writePolicy.authorize({ operation: "add_project_item", projectId });
+    this.options.writePolicy.authorize({ operation: "update_status", projectId });
+
+    try {
+      const result = await this.captureProjectBacklogItem(
+        this.options.client,
+        this.options.workItems,
+        { owner, projectNumber: number, projectId, url },
+      );
+      const outcome = result.changed ? "success" : "no_change";
+      const audit = this.options.auditService.record({
+        operation: "capture_backlog",
+        outcome,
+        actorId: addDecision.actorId,
+        projectId,
+        projectOwner: owner,
+        projectNumber: number,
+        itemId: result.itemId,
+        fieldName: "Status",
+        requestedValue: "Backlog",
+        beforeValue: result.status.before?.name ?? null,
+        afterValue: result.status.after?.name ?? null,
+        verified: result.verified,
+        errorCode: null,
+      });
+
+      return {
+        ...result,
+        auditId: audit.id,
+        actorId: audit.actorId,
+        operation: "capture_backlog",
+        outcome,
+        auditPersistence: "process-local",
+      };
+    } catch (error) {
+      this.options.auditService.recordFailure({
+        operation: "capture_backlog",
+        actorId: addDecision.actorId,
+        projectId,
+        projectOwner: owner,
+        projectNumber: number,
+        itemId: null,
+        fieldName: "Status",
+        requestedValue: "Backlog",
         beforeValue: null,
         afterValue: null,
       }, error);

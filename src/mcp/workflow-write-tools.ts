@@ -5,6 +5,7 @@ import { AuditService } from "../core/audit/audit-service.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { HighLevelWriteService } from "../core/writes/high-level-write-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
+import type { CaptureBacklogWorkItemReader } from "../workflow/capture-backlog.js";
 import type { WriteAuditEntry } from "../workflow/write-audit.js";
 import { registerHighLevelWriteTools } from "./high-level-write-tools.js";
 
@@ -14,6 +15,7 @@ interface RegisterWorkflowWriteToolsOptions {
   writePolicy: WritePolicy;
   auditService: AuditService;
   resolveProject: (owner: string, number: number) => Promise<unknown>;
+  workItems: CaptureBacklogWorkItemReader;
   projectIdOf: (project: unknown) => string;
   json: (value: unknown) => { content: Array<{ type: "text"; text: string }> };
 }
@@ -32,6 +34,7 @@ export function registerWorkflowWriteTools(options: RegisterWorkflowWriteToolsOp
   const writes = new HighLevelWriteService({
     client: options.client,
     projects: { resolveProject: options.resolveProject },
+    workItems: options.workItems,
     writePolicy: options.writePolicy,
     auditService: options.auditService,
   });

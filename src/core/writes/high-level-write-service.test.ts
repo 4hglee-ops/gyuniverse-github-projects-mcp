@@ -48,9 +48,7 @@ function createService(calls: NamedSingleSelectUpdateInput[]) {
 test("semantic status update is idempotent, verified, and audited", async () => {
   const calls: NamedSingleSelectUpdateInput[] = [];
   const { service } = createService(calls);
-
   const result = await service.updateWorkItemStatus("gyuniverse-hq", 2, "PVTI_ITEM", "Todo");
-
   assert.equal(result.changed, false);
   assert.equal(result.verified, true);
   assert.equal(result.operation, "update_status");
@@ -64,9 +62,7 @@ test("semantic status update is idempotent, verified, and audited", async () => 
 test("startWork maps semantic intent to exact In Progress status", async () => {
   const calls: NamedSingleSelectUpdateInput[] = [];
   const { service } = createService(calls);
-
   const result = await service.startWork("gyuniverse-hq", 2, "PVTI_ITEM");
-
   assert.equal(result.operation, "update_status");
   assert.equal(calls[0]?.fieldName, "Status");
   assert.equal(calls[0]?.optionName, "In Progress");
@@ -75,9 +71,7 @@ test("startWork maps semantic intent to exact In Progress status", async () => {
 test("semantic priority update uses Priority field", async () => {
   const calls: NamedSingleSelectUpdateInput[] = [];
   const { service } = createService(calls);
-
   const result = await service.updateWorkItemPriority("gyuniverse-hq", 2, "PVTI_ITEM", "P1");
-
   assert.equal(result.operation, "update_priority");
   assert.equal(calls[0]?.fieldName, "Priority");
   assert.equal(calls[0]?.optionName, "P1");
@@ -85,17 +79,11 @@ test("semantic priority update uses Priority field", async () => {
 
 test("assignWorkItem is idempotent, verified, actor-aware, and audited", async () => {
   const auditService = new AuditService();
-  const principal = principalForRole("user:admin-validation", "admin", {
-    projectIds: ["PVT_PROJECT"],
-  });
+  const principal = principalForRole("user:admin-validation", "admin", { projectIds: ["PVT_PROJECT"] });
   const calls: Array<{ projectId: string; itemId: string; assigneeLogin: string }> = [];
   const service = new HighLevelWriteService({
     client: {} as GitHubGraphQlClient,
-    projects: {
-      async resolveProject() {
-        return { id: "PVT_PROJECT", number: 2, title: "Bid Change Validator · WBS" };
-      },
-    },
+    projects: { async resolveProject() { return { id: "PVT_PROJECT", number: 2, title: "Bid Change Validator · WBS" }; } },
     writePolicy: new WritePolicy(config, principal),
     auditService,
     async assignWorkItem(_client, input) {
@@ -113,9 +101,7 @@ test("assignWorkItem is idempotent, verified, actor-aware, and audited", async (
       };
     },
   });
-
   const result = await service.assignWorkItem("gyuniverse-hq", 2, "PVTI_ITEM", "4hglee-ops");
-
   assert.equal(result.changed, false);
   assert.equal(result.verified, true);
   assert.equal(result.operation, "assign_work_item");
@@ -123,9 +109,60 @@ test("assignWorkItem is idempotent, verified, actor-aware, and audited", async (
   assert.equal(result.actorId, "user:admin-validation");
   assert.equal(result.auditId, "write-1");
   assert.deepEqual(calls, [{ projectId: "PVT_PROJECT", itemId: "PVTI_ITEM", assigneeLogin: "4hglee-ops" }]);
-
   const entries = auditService.list().entries;
   assert.equal(entries[0]?.fieldName, "Assignees");
   assert.equal(entries[0]?.requestedValue, "4hglee-ops");
   assert.equal(entries[0]?.outcome, "no_change");
+});
+
+test("captureBacklog pre-authorizes add and status, then returns actor-aware no_change", async () => {
+  const auditService = new AuditService();
+  const principal = principalForRole("user:member-validation", "member", { projectIds: ["PVT_PROJECT"] });
+  const service = new HighLevelWriteService({
+    client: {} as GitHubGraphQlClient,
+    projects: { async resolveProject() { return { id: "PVT_PROJECT", number: 2, title: "Bid Change Validator · WBS" }; } },
+    workItems: { async resolveProjectItem() { throw new Error("stub should be handled by captureBacklog override"); } },
+    writePolicy: new WritePolicy(config, principal),
+    auditService,
+    async captureBacklog(_client, _workItems, input) {
+      return {
+        changed: false,
+        verified: true,
+        addedToProject: false,
+        itemId: "PVTI_ITEM",
+        content: {
+          id: "ISSUE_NODE",
+          title: "Test issue",
+          url: input.url,
+          repository: "gyuniverse-hq/bid-change-validator",
+        },
+        status: {
+          changed: false,
+          verified: true,
+          project: { id: input.projectId, number: input.projectNumber, title: "Bid Change Validator · WBS" },
+          itemId: "PVTI_ITEM",
+          field: { id: "STATUS_FIELD", name: "Status" },
+          requestedOption: { id: "BACKLOG", name: "Backlog" },
+          before: { id: "BACKLOG", name: "Backlog" },
+          after: { id: "BACKLOG", name: "Backlog" },
+          mutationSkippedReason: "already_at_requested_option",
+        },
+        mutationSkippedReason: "already_captured_in_backlog",
+      };
+    },
+  });
+
+  const result = await service.captureBacklog(
+    "gyuniverse-hq",
+    2,
+    "https://github.com/gyuniverse-hq/bid-change-validator/issues/99",
+  );
+
+  assert.equal(result.changed, false);
+  assert.equal(result.verified, true);
+  assert.equal(result.operation, "capture_backlog");
+  assert.equal(result.outcome, "no_change");
+  assert.equal(result.actorId, "user:member-validation");
+  assert.equal(result.auditId, "write-1");
+  assert.equal(auditService.list().entries[0]?.requestedValue, "Backlog");
 });

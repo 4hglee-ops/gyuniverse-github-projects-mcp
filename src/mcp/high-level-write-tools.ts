@@ -63,4 +63,20 @@ export function registerHighLevelWriteTools({ server, writes, json }: RegisterHi
       await writes.assignWorkItem(owner, number, itemId, assigneeLogin),
     ),
   );
+
+  server.registerTool(
+    "capture_backlog",
+    {
+      description: "Capture an existing GitHub Issue or Pull Request URL into one authorized Project and ensure its Status is exactly 'Backlog'. If already captured in Backlog, returns no_change. Requires both item.add and item.update_status permissions before any mutation.",
+      inputSchema: z.object({
+        owner: z.string().min(1),
+        number: z.number().int().min(1),
+        url: z.string().url(),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async ({ owner, number, url }) => json(
+      await writes.captureBacklog(owner, number, url),
+    ),
+  );
 }

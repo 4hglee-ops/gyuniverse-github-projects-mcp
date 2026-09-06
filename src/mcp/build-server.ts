@@ -43,7 +43,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
 
   registerCheckpointTools({ server, changes: changeService, json });
   registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, principal, json });
-  registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, projectIdOf, json });
+  registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, workItems: workItemService, projectIdOf, json });
 
   server.registerTool(
     "list_github_projects",
