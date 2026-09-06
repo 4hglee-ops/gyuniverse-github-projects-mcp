@@ -278,7 +278,7 @@ export function openApiDocument(baseUrl: string) {
           "add_github_project_sub_issue",
           "Add the target Issue as a sub-issue of the source Issue.",
           relationshipWriteSchema,
-          `Admin-only single-edge write. ${friendlyReferenceDescription} Resolution stays inside the same authorized Project before the existing M10 service enforces complete relationship evidence, the global write gate, reciprocal verification and durable audit.`,
+          "Admin-only single-edge write. Resolve both Issues only inside the same authorized Project; number-only references must be unique. Existing M10 relationship checks, global write gate, reciprocal verification and durable audit apply.",
         ),
       },
       "/api/v1/write/relationship/remove-sub-issue": {
@@ -294,7 +294,7 @@ export function openApiDocument(baseUrl: string) {
           "add_github_project_blocked_by",
           "Make the source Issue blocked by the target Issue.",
           relationshipWriteSchema,
-          `Admin-only single-edge write. ${friendlyReferenceDescription} Both Issues must be in the same authorized Project; requires cycle safety, verification and durable audit.`,
+          "Admin-only single-edge write. Resolve both Issues only inside the same authorized Project; number-only references must be unique. Existing M10 cycle checks, global write gate, reciprocal verification and durable audit apply.",
         ),
       },
       "/api/v1/write/relationship/remove-blocked-by": {
@@ -310,7 +310,7 @@ export function openApiDocument(baseUrl: string) {
           "preview_github_project_bulk_updates",
           "Create an immutable preview for 1-20 Status/Priority updates in one authorized Project.",
           bulkPreviewSchema,
-          `Admin-only governance action. ${friendlyReferenceDescription} Every reference resolves before the immutable Preview is persisted. Preview stores an expiring plan but does not mutate GitHub and requires bulk.preview, underlying item capabilities, OAuth write scope and the global write gate.`,
+          "Admin-only governance action. Resolve every item reference inside the authorized Project before the immutable Preview is persisted; any resolution failure creates no plan. Preview does not mutate GitHub and requires bulk.preview, item capabilities, OAuth write scope and the global write gate.",
         ),
       },
       "/api/v1/write/bulk/approve": {
