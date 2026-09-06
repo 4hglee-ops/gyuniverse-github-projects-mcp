@@ -23,6 +23,7 @@ export interface WriteAuditEntry {
   afterValue: string | null;
   verified: boolean;
   errorCode: string | null;
+  capability?: string;
   planId?: string;
   relationship?: RelationshipAuditMetadata;
 }
@@ -57,6 +58,7 @@ export function createWriteAuditEntry(
     afterValue: bounded(input.afterValue, 512),
     verified: input.verified,
     errorCode: bounded(input.errorCode, 128),
+    ...(input.capability ? { capability: input.capability.slice(0, 100) } : {}),
     ...(input.planId ? { planId: input.planId.slice(0, 128) } : {}),
     ...(input.relationship ? { relationship: {
       sourceContentId: input.relationship.sourceContentId.slice(0, 256),

@@ -119,7 +119,7 @@ Authentication -> Identity -> Membership -> Role/Permission -> Operation Policy
 - [x] Remove legacy shared-team write authorization; compatibility subject is read-only only
 
 Current permission baseline:
-- Admin: Project read/write + create/add/assign + generic field/status/priority writes
+- Admin: Project read/write + create/add/assign + generic field/status/priority/relationship writes + bulk Preview/Approve/Apply
 - Member: Project read/write + add item + status/priority writes; no create/assign/unrestricted generic field mutation
 - Viewer: Project read-only
 
@@ -224,12 +224,24 @@ Advanced Governance is implemented in bounded slices rather than one large mutat
 - [x] Verified per-item writes with durable `planId` audit correlation
 - [x] Terminal completed/failed/partial representation; no retry, rollback or resume
 - [x] Local persistence, cross-instance CAS and fail-closed validation regressions
+- [x] Review and Production validation (two-item apply/audit, duplicate no-op, cleanup, stale zero-write, redeploy restore)
+
+### M10-6 Richer ACL
+- [x] Preserve Viewer/Member/Admin defaults while enforcing explicit operation capabilities
+- [x] Add `bulk.preview`, `bulk.approve`, and `bulk.apply` capability boundaries
+- [x] Allow identity permission snapshots to narrow, never expand, role defaults
+- [x] Require owner allowlist, Project allowlist, identity membership and capability intersection for authenticated access
+- [x] Keep tool discovery separate from fail-closed runtime authorization
+- [x] Add default same-Admin and optional distinct-Admin maker-checker policies
+- [x] Recheck current approver/applier and underlying item capabilities before mutation
+- [x] Preserve bounded durable audit compatibility with optional capability metadata
+- [x] Local ACL, maker-checker, tool-exposure and M10 regression coverage
 - [ ] Review and Production validation
 
 ### Remaining
 - [x] M10-4 review / Production validation and close
-- [ ] M10-5 review / Production validation and close
-- [ ] M10-6 Richer ACL
+- [x] M10-5 review / Production validation and close
+- [ ] M10-6 review / Production validation and close
 - [ ] M10-7 Production validation / milestone close
 
 Iteration remains optional and is not reintroduced into Project #2 unless the operating model changes explicitly.

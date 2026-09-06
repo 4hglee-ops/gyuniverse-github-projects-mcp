@@ -375,15 +375,30 @@ Current properties:
 
 This is durable operational evidence in Production, not a substitute for an external compliance/SIEM archive.
 
+## Richer ACL and bulk approval (M10-6)
+
+Viewer, Member and Admin remain stable default permission bundles. Runtime
+authorization now uses explicit operation capabilities, including
+`bulk.preview`, `bulk.approve` and `bulk.apply`, intersected with both server
+allowlists and the identity's Project memberships. OAuth identity records may
+optionally narrow their role defaults with a `permissions` array; they cannot
+expand them.
+
+Bulk self-approval remains compatible by default. Set
+`M10_BULK_APPROVAL_MODE=distinct_admin_required` only when a separate authorized
+Admin should approve. Preview, Approval and Apply recheck current capabilities;
+creator, approver and applier may be different identities. See
+[`docs/M10_RICHER_ACL.md`](docs/M10_RICHER_ACL.md).
+
 ## Safety model
 
 ### Owner allowlist
 
-`GITHUB_PROJECTS_ALLOWED_OWNERS` limits users/organizations whose Projects the MCP can read.
+`GITHUB_PROJECTS_ALLOWED_OWNERS` limits users/organizations whose Projects the MCP can read. Authenticated access fails closed when it is empty.
 
 ### Project allowlist
 
-`GITHUB_PROJECTS_ALLOWED_PROJECT_IDS` is optional for reads. For writes it is mandatory and fail-closed.
+`GITHUB_PROJECTS_ALLOWED_PROJECT_IDS` is mandatory for authenticated reads and all writes. Local unauthenticated compatibility reads may omit it.
 
 ### GitHub write gate
 

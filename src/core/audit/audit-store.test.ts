@@ -135,3 +135,14 @@ test("bulk plan correlation is bounded, durable, and backwards compatible", asyn
   redis.values.set("gyuniverse:m10:audit:v1:entries", [JSON.stringify({ ...malformed, planId: { secret: "value" } })]);
   await assert.rejects(() => store.list(), /DURABLE_AUDIT_INVALID/);
 });
+
+test("durable capability metadata accepts known names and rejects malformed values", async () => {
+  const redis = new FakeRedisAuditClient();
+  const store = new RedisWriteAuditStore(redis);
+  await store.append({ ...base, capability: "bulk.apply" });
+  assert.equal((await new RedisWriteAuditStore(redis).list())[0]?.capability, "bulk.apply");
+
+  const stored = JSON.parse(String(redis.values.values().next().value?.[0]));
+  redis.values.set("gyuniverse:m10:audit:v1:entries", [JSON.stringify({ ...stored, capability: "secret.custom" })]);
+  await assert.rejects(() => store.list(), /DURABLE_AUDIT_INVALID/);
+});

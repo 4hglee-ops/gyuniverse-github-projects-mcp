@@ -5,6 +5,7 @@ import {
 } from "../../workflow/write-audit.js";
 import { createWriteAuditStore } from "./audit-store-factory.js";
 import type { WriteAuditStoreLike } from "./audit-store.js";
+import { permissionForAuditOperation } from "../policy/write-policy.js";
 
 export interface AuditListOptions {
   limit?: number;
@@ -69,7 +70,11 @@ export class AuditService {
 
   private async persist(input: RecordWriteAuditInput): Promise<WriteAuditEntry> {
     try {
-      return await this.store.append(input);
+      const capability = input.capability ?? permissionForAuditOperation(input.operation);
+      return await this.store.append({
+        ...input,
+        ...(capability ? { capability } : {}),
+      });
     } catch (error) {
       throw new AuditPersistenceError(error);
     }

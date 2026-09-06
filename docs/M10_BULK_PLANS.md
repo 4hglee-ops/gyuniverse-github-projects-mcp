@@ -41,11 +41,12 @@ previewed -> approved -> applying -> completed
 ```
 
 Preflight rejection transitions an approved plan directly to terminal `failed`
-with zero writes. M10-5 requires an authenticated Admin, Project membership,
-global write gate, explicit Project allowlist, and the permission for each
-underlying Status/Priority operation at Preview, Approval, and Apply. The same
-Admin must create and approve/apply the plan, but `createdBy` and `approvedBy` and
-their separate events remain explicit. Maker-checker policy is deferred to M10-6.
+with zero writes. M10-6 now adds explicit `bulk.preview`, `bulk.approve` and
+`bulk.apply` checks on top of authenticated Project access, global write gate,
+explicit allowlists and underlying Status/Priority permissions. The default
+`same_admin_allowed` mode preserves the original individual workflow; optional
+`distinct_admin_required` separates creator and approver. Creator, approver and
+applier IDs remain explicit in durable events.
 
 CAS-protected state changes make approval and Apply single-use across serverless
 instances. Duplicate Apply on a terminal plan returns the existing result without

@@ -119,6 +119,21 @@ and become terminal `failed`/`partial` results without retry or rollback. Existi
 durable item audits receive optional `planId` correlation and the plan stores
 separate bounded lifecycle events. See [M10 bulk plans](M10_BULK_PLANS.md).
 
+Production validation is complete: the two-item fixture apply, per-item durable
+audit correlation, duplicate Apply no-op, bulk cleanup, stale-plan zero-write
+failure and post-redeploy plan/audit restoration were verified. Issues #8 and #9
+were restored to Backlog.
+
+## M10-6 Richer ACL
+
+Implementation and local regression coverage are complete. Existing permission
+names remain compatible, explicit `bulk.preview`, `bulk.approve` and `bulk.apply`
+capabilities now guard each stage, and identity-level permission snapshots may
+only narrow role defaults. Authenticated Project access is the intersection of
+owner/Project allowlists, identity membership and current capability. Optional
+distinct-Admin approval is available without changing the default individual
+workflow. See [M10 richer ACL](M10_RICHER_ACL.md).
+
 ## Remaining
 
 - [x] M10-1 durable checkpoint store abstraction
@@ -132,6 +147,7 @@ separate bounded lifecycle events. See [M10 bulk plans](M10_BULK_PLANS.md).
 - [x] M10-4 guarded relationship write implementation and regression coverage
 - [x] M10-4 Production mutation/cleanup/redeploy validation (operator handoff evidence)
 - [x] M10-5 implementation and local regression coverage
-- [ ] M10-5 review / Production validation
-- [ ] M10-6 richer ACL
+- [x] M10-5 review / Production validation
+- [x] M10-6 richer ACL implementation and regression coverage
+- [ ] M10-6 review / Production validation
 - [ ] M10-7 final validation / close

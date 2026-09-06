@@ -70,4 +70,19 @@ test("AuditService normalizes failure error codes", async () => {
   assert.equal(entry.outcome, "failed");
   assert.equal(entry.verified, false);
   assert.equal(entry.errorCode, "MUTATION_VERIFICATION_FAILED");
+  assert.equal(entry.capability, "item.update_status");
+});
+
+test("AuditService derives only the bounded capability name and never persists credentials", async () => {
+  const audit = new AuditService();
+  const entry = await audit.record({
+    ...successEntry(),
+    actorId: "user:admin",
+    authorization: "Bearer secret",
+    accessToken: "secret-token",
+  } as ReturnType<typeof successEntry> & { actorId: string; authorization: string; accessToken: string });
+  assert.equal(entry.capability, "item.update_status");
+  assert.equal("authorization" in entry, false);
+  assert.equal("accessToken" in entry, false);
+  assert.equal(JSON.stringify(entry).includes("secret"), false);
 });

@@ -60,6 +60,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
     bulk: new BulkPlanService({
       client, projects: { resolveProject }, principal, writePolicy, audit: auditService,
       store: createBulkPlanStore(),
+      bulkApprovalMode: config.bulkApprovalMode,
     }),
     json,
   });

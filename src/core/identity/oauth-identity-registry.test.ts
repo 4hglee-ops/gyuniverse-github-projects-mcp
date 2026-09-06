@@ -37,7 +37,7 @@ test("registry rejects duplicate subjects, duplicate codes, and missing Project 
 
   assert.throws(() => new OAuthIdentityRegistry([
     { subject: "user:one", accessCode: "one", role: "member", projectIds: [] },
-  ]), /must allow at least one Project/);
+  ]), /must allow between one and 100/);
 });
 
 test("environment registry is empty by default and validates JSON", () => {
@@ -52,4 +52,33 @@ test("environment registry is empty by default and validates JSON", () => {
     if (before === undefined) delete process.env.MCP_OAUTH_IDENTITIES_JSON;
     else process.env.MCP_OAUTH_IDENTITIES_JSON = before;
   }
+});
+
+test("identity permissions may safely narrow but never expand role defaults", () => {
+  const registry = new OAuthIdentityRegistry([{
+    subject: "user:approver",
+    accessCode: "approver-code",
+    role: "admin",
+    projectIds: ["PVT_allowed"],
+    permissions: ["project.read", "project.write", "bulk.approve"],
+  }]);
+  assert.deepEqual(registry.resolvePrincipal("user:approver")?.permissions, [
+    "project.read", "project.write", "bulk.approve",
+  ]);
+
+  assert.throws(() => new OAuthIdentityRegistry([{
+    subject: "user:viewer",
+    accessCode: "viewer-code",
+    role: "viewer",
+    projectIds: ["PVT_allowed"],
+    permissions: ["project.read", "bulk.apply"],
+  }]), /may narrow but not expand/);
+
+  assert.throws(() => new OAuthIdentityRegistry([{
+    subject: "user:invalid",
+    accessCode: "invalid-code",
+    role: "admin",
+    projectIds: ["PVT_allowed"],
+    permissions: ["project.read", "not-a-capability" as never],
+  }]), /supported capability names/);
 });
