@@ -77,6 +77,20 @@ function parseStoredEntry(value: unknown): WriteAuditEntry {
     "itemId", "operation", "outcome", "projectId", "projectNumber", "projectOwner",
     "requestedValue", "verified",
   ];
+  if ("relationship" in candidate) {
+    exactKeys.push("relationship");
+    const relation = candidate.relationship;
+    if (!relation || typeof relation !== "object" || Array.isArray(relation)) {
+      throw new Error("DURABLE_AUDIT_INVALID: Invalid relationship metadata.");
+    }
+    const metadata = relation as Record<string, unknown>;
+    if (Object.keys(metadata).sort().join(",") !== "sourceContentId,targetContentId,targetItemId,type" ||
+        !["sub_issue", "blocked_by"].includes(String(metadata.type)) ||
+        !["sourceContentId", "targetContentId", "targetItemId"].every((key) =>
+          typeof metadata[key] === "string" && metadata[key].length > 0 && metadata[key].length <= 256)) {
+      throw new Error("DURABLE_AUDIT_INVALID: Invalid relationship metadata.");
+    }
+  }
 
   if (
     Object.keys(candidate).sort().join("\0") !== exactKeys.sort().join("\0") ||

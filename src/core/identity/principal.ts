@@ -8,7 +8,8 @@ export type ProjectPermission =
   | "item.assign"
   | "item.update_field"
   | "item.update_status"
-  | "item.update_priority";
+  | "item.update_priority"
+  | "item.relationship.write";
 
 export interface AuthenticatedPrincipal {
   id: string;
@@ -30,6 +31,7 @@ const ROLE_PERMISSIONS: Record<ProjectRole, readonly ProjectPermission[]> = {
     "item.update_field",
     "item.update_status",
     "item.update_priority",
+    "item.relationship.write",
   ],
   member: [
     "project.read",

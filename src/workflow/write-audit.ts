@@ -1,5 +1,12 @@
 export type WriteAuditOutcome = "success" | "no_change" | "failed";
 
+export interface RelationshipAuditMetadata {
+  sourceContentId: string;
+  targetItemId: string;
+  targetContentId: string;
+  type: "sub_issue" | "blocked_by";
+}
+
 export interface WriteAuditEntry {
   id: string;
   at: string;
@@ -16,6 +23,7 @@ export interface WriteAuditEntry {
   afterValue: string | null;
   verified: boolean;
   errorCode: string | null;
+  relationship?: RelationshipAuditMetadata;
 }
 
 export interface RecordWriteAuditInput extends Omit<WriteAuditEntry, "id" | "at" | "actorId"> {
@@ -48,6 +56,12 @@ export function createWriteAuditEntry(
     afterValue: bounded(input.afterValue, 512),
     verified: input.verified,
     errorCode: bounded(input.errorCode, 128),
+    ...(input.relationship ? { relationship: {
+      sourceContentId: input.relationship.sourceContentId.slice(0, 256),
+      targetItemId: input.relationship.targetItemId.slice(0, 256),
+      targetContentId: input.relationship.targetContentId.slice(0, 256),
+      type: input.relationship.type,
+    } } : {}),
   };
 }
 

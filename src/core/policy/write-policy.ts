@@ -15,7 +15,11 @@ export type WriteOperation =
   | "create_work_item"
   | "update_project_item_field"
   | "update_status"
-  | "update_priority";
+  | "update_priority"
+  | "add_sub_issue"
+  | "remove_sub_issue"
+  | "add_blocked_by"
+  | "remove_blocked_by";
 
 const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
   add_project_item: "item.add",
@@ -25,6 +29,10 @@ const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
   update_project_item_field: "item.update_field",
   update_status: "item.update_status",
   update_priority: "item.update_priority",
+  add_sub_issue: "item.relationship.write",
+  remove_sub_issue: "item.relationship.write",
+  add_blocked_by: "item.relationship.write",
+  remove_blocked_by: "item.relationship.write",
 };
 
 export interface WritePolicyRequest {
@@ -54,6 +62,9 @@ export class WritePolicy {
   authorize(request: WritePolicyRequest): WritePolicyDecision {
     assertProjectWriteAllowed(this.config, request.projectId);
     const permission = OPERATION_PERMISSION[request.operation];
+    if (permission === "item.relationship.write") {
+      this.identity.assertPermission(this.principal, permission);
+    }
 
     if (this.principal) {
       this.identity.assertProjectMembership(this.principal, request.projectId);

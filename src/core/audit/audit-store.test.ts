@@ -93,3 +93,32 @@ test("redis audit persists only bounded allowlisted metadata", async () => {
   assert.equal(raw.includes("rawMutationPayload"), false);
   assert.equal((await store.list())[0]?.requestedValue?.length, 512);
 });
+
+test("relationship metadata is bounded, strips extra payloads, and coexists with legacy audit records", async () => {
+  const redis = new FakeRedisAuditClient();
+  const store = new RedisWriteAuditStore(redis);
+  await store.append(base);
+  await store.append({ ...base, operation: "add_sub_issue", relationship: {
+    sourceContentId: "I".repeat(300), targetItemId: "ITEM2", targetContentId: "I2", type: "sub_issue",
+    rawMutationPayload: "secret-payload", bearerToken: "secret-token",
+  } } as typeof base & { relationship: { sourceContentId: string; targetItemId: string; targetContentId: string; type: "sub_issue" } });
+  const restored = await new RedisWriteAuditStore(redis).list();
+  assert.equal(restored.length, 2);
+  assert.equal(restored[0]!.relationship!.sourceContentId.length, 256);
+  assert.equal(restored[1]!.relationship, undefined);
+  const raw = JSON.stringify(redis.values.values().next().value);
+  assert.ok(!raw.includes("secret-payload"));
+  assert.ok(!raw.includes("secret-token"));
+});
+
+test("malformed optional relationship metadata fails closed in durable storage", async () => {
+  const redis = new FakeRedisAuditClient();
+  const store = new RedisWriteAuditStore(redis);
+  await store.append(base);
+  const legacy = JSON.parse(String(redis.values.values().next().value?.[0]));
+  for (const relationship of [null, {}, { sourceContentId: "I1", targetItemId: "ITEM2", targetContentId: "I2", type: "unknown" },
+    { sourceContentId: "I1", targetItemId: "ITEM2", targetContentId: "I2", type: "blocked_by", raw: "secret" }]) {
+    redis.values.set("gyuniverse:m10:audit:v1:entries", [JSON.stringify({ ...legacy, relationship })]);
+    await assert.rejects(() => store.list(), /DURABLE_AUDIT_INVALID/);
+  }
+});

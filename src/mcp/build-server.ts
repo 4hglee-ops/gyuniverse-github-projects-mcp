@@ -18,6 +18,8 @@ import { registerHighLevelReadTools } from "./high-level-read-tools.js";
 import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
 import { ProjectRelationshipService } from "../core/relationships/project-relationship-service.js";
 import { registerRelationshipTools } from "./relationship-tools.js";
+import { RelationshipWriteService } from "../core/relationships/relationship-write-service.js";
+import { registerRelationshipWriteTools } from "./relationship-write-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -44,6 +46,8 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   const resolveProject = projectService.resolveProject.bind(projectService);
 
   registerRelationshipTools(server, new ProjectRelationshipService({ config, client, projects: projectService }));
+  registerRelationshipWriteTools(server, new RelationshipWriteService({ principal, client, projects: projectService,
+    reads: new ProjectRelationshipService({ config, client, projects: projectService }), writePolicy, audit: auditService }));
 
   registerCheckpointTools({ server, changes: changeService, json });
   registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, principal, json });
