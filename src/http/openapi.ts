@@ -21,6 +21,65 @@ const writeTargetSchema = {
   },
 } as const;
 
+const relationshipReadSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["owner", "number", "itemId"],
+  properties: {
+    owner: { type: "string", minLength: 1, maxLength: 100 },
+    number: { type: "integer", minimum: 1 },
+    itemId: { type: "string", minLength: 1, maxLength: 256, description: "Source GitHub Project v2 item node ID." },
+    first: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+  },
+} as const;
+
+const relationshipWriteSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["owner", "number", "sourceItemId", "targetItemId"],
+  properties: {
+    owner: { type: "string", minLength: 1, maxLength: 100 },
+    number: { type: "integer", minimum: 1 },
+    sourceItemId: { type: "string", minLength: 1, maxLength: 256 },
+    targetItemId: { type: "string", minLength: 1, maxLength: 256 },
+  },
+} as const;
+
+const bulkPlanReferenceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["planId", "planDigest"],
+  properties: {
+    planId: { type: "string", pattern: "^bulk-plan-[0-9a-f-]{36}$" },
+    planDigest: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$", description: "Digest returned by the immutable preview." },
+  },
+} as const;
+
+const bulkPreviewSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["owner", "number", "operations"],
+  properties: {
+    owner: { type: "string", minLength: 1, maxLength: 100 },
+    number: { type: "integer", minimum: 1 },
+    operations: {
+      type: "array",
+      minItems: 1,
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["itemId", "field", "value"],
+        properties: {
+          itemId: { type: "string", minLength: 1, maxLength: 256 },
+          field: { type: "string", enum: ["Status", "Priority"] },
+          value: { type: "string", minLength: 1, maxLength: 256 },
+        },
+      },
+    },
+  },
+} as const;
+
 const jsonRequest = (schema: unknown) => ({ required: true, content: { "application/json": { schema } } });
 
 const successResponse = {
@@ -96,7 +155,7 @@ export function openApiDocument(baseUrl: string) {
     openapi: "3.1.0",
     info: {
       title: "Gyuniverse GitHub Projects Operator API",
-      version: "0.3.1",
+      version: "0.4.0",
       description: "Semantic REST adapter over the same Shared Core used by the Gyuniverse GitHub Projects MCP. Guarded writes share OAuth identity, Project membership, ACL, verification, and audit rules with MCP. Failed writes return action guidance; partial failures must not be blindly retried.",
     },
     servers: [{ url: base }],
@@ -120,6 +179,20 @@ export function openApiDocument(baseUrl: string) {
       "/api/v1/project/review-queue": { post: readOperation("getReviewQueue", "Get Project items whose Status is In Review.") },
       "/api/v1/project/unassigned": { post: readOperation("getUnassignedWork", "Get non-completed Project items with no assignee evidence.") },
       "/api/v1/project/blockers": { post: readOperation("getBlockers", "Get only explicitly evidenced Project blockers.") },
+      "/api/v1/project/item-relationships": {
+        post: readOperation(
+          "get_github_project_item_relationships",
+          "Read native parent, sub-issue, blocks and blocked-by relationships for one authorized Project Issue item.",
+          relationshipReadSchema,
+        ),
+      },
+      "/api/v1/project/bulk-plan": {
+        post: readOperation(
+          "get_github_project_bulk_plan",
+          "Read an authorized durable M10 bulk plan and its lifecycle results.",
+          { ...bulkPlanReferenceSchema, required: ["planId"] as const, properties: { planId: bulkPlanReferenceSchema.properties.planId } },
+        ),
+      },
       "/api/v1/write/status": {
         post: writeOperation(
           "updateWorkItemStatus",
@@ -161,6 +234,62 @@ export function openApiDocument(baseUrl: string) {
           "Create a GitHub Issue, capture it into the Project, and ensure Backlog status.",
           { type: "object", additionalProperties: false, required: ["owner", "number", "repository", "title"], properties: { owner: { type: "string", minLength: 1 }, number: { type: "integer", minimum: 1 }, repository: { type: "string", minLength: 1, description: "Repository name under the authorized Project owner." }, title: { type: "string", minLength: 1 }, body: { type: ["string", "null"] } } },
           "Creates a new Issue and is not idempotent by title/body. Never automatically retry CREATE_WORK_ITEM_PARTIAL_FAILURE; first inspect the Issue URL in the error message and current Project state to avoid duplicates.",
+        ),
+      },
+      "/api/v1/write/relationship/add-sub-issue": {
+        post: writeOperation(
+          "add_github_project_sub_issue",
+          "Add the target Issue as a sub-issue of the source Issue.",
+          relationshipWriteSchema,
+          "Admin-only single-edge write. Requires same authorized Project membership, complete relationship evidence, global write gate, reciprocal verification and durable audit.",
+        ),
+      },
+      "/api/v1/write/relationship/remove-sub-issue": {
+        post: writeOperation(
+          "remove_github_project_sub_issue",
+          "Remove the target Issue from the source Issue's sub-issues.",
+          relationshipWriteSchema,
+          "Admin-only single-edge write. Does not delete either Issue; requires reciprocal verification and durable audit.",
+        ),
+      },
+      "/api/v1/write/relationship/add-blocked-by": {
+        post: writeOperation(
+          "add_github_project_blocked_by",
+          "Make the source Issue blocked by the target Issue.",
+          relationshipWriteSchema,
+          "Admin-only single-edge write. Both Issues must be in the same authorized Project; requires cycle safety, verification and durable audit.",
+        ),
+      },
+      "/api/v1/write/relationship/remove-blocked-by": {
+        post: writeOperation(
+          "remove_github_project_blocked_by",
+          "Remove the source Issue's blocked-by relationship to the target Issue.",
+          relationshipWriteSchema,
+          "Admin-only single-edge write. Requires reciprocal verification and durable audit; do not retry a failed mutation blindly.",
+        ),
+      },
+      "/api/v1/write/bulk/preview": {
+        post: writeOperation(
+          "preview_github_project_bulk_updates",
+          "Create an immutable preview for 1-20 Status/Priority updates in one authorized Project.",
+          bulkPreviewSchema,
+          "Admin-only governance action. Stores an expiring plan but does not mutate GitHub. Requires bulk.preview, the underlying item capabilities, OAuth write scope and the global write gate.",
+        ),
+      },
+      "/api/v1/write/bulk/approve": {
+        post: writeOperation(
+          "approve_github_project_bulk_plan",
+          "Explicitly approve the exact immutable bulk plan identified by its ID and digest.",
+          bulkPlanReferenceSchema,
+          "Admin-only governance action. Enforces bulk.approve and the configured maker-checker policy; does not mutate GitHub.",
+        ),
+      },
+      "/api/v1/write/bulk/apply": {
+        post: writeOperation(
+          "apply_github_project_bulk_plan",
+          "Apply one approved bulk plan once after full preflight.",
+          bulkPlanReferenceSchema,
+          "Admin-only guarded write. A stale or unauthorized plan performs zero writes. Runtime partial failures are not rolled back or automatically retried; per-item durable audit is retained.",
         ),
       },
     },

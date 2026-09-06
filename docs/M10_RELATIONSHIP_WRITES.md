@@ -1,6 +1,6 @@
 # M10-4 Guarded single-relationship writes
 
-M10-4 adds four MCP tools backed by `RelationshipWriteService`. M10-3 relationship reads, ordinary snapshots, blocker inference, checkpoints and their authorization remain unchanged. This milestone does not add REST/GPT Action endpoints, bulk operations, or full M10-6 ACL policy management.
+M10-4 adds four MCP tools backed by `RelationshipWriteService`. M10-3 relationship reads, ordinary snapshots, blocker inference, checkpoints and their authorization remain unchanged. The original milestone did not add REST/GPT Action endpoints; the later Actions integration exposes the same service and controls without changing the relationship model. Relationship bulk operations remain unsupported.
 
 ## Native API mapping and direction
 

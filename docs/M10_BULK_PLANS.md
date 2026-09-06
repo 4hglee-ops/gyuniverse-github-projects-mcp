@@ -18,6 +18,10 @@ get_github_project_bulk_plan
   -> current state, events and per-item results
 ```
 
+These operation IDs are available through both MCP and the REST/GPT Actions
+OpenAPI adapter. The Actions routes dispatch to the same `BulkPlanService` and
+durable store; they do not translate into or call MCP requests.
+
 Preview performs no GitHub mutation. It resolves the Project, authorizes every
 underlying operation, resolves exact field options, and captures the field ID plus
 current and target option IDs/names. Duplicate item/field pairs are rejected. The immutable

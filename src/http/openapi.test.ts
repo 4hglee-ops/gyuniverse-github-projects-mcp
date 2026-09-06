@@ -7,7 +7,7 @@ import { handleRemoteHttpRequest } from "./router.js";
 test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", () => {
   const document = openApiDocument("https://example.test");
   assert.equal(document.openapi, "3.1.0");
-  assert.equal(document.info.version, "0.3.1");
+  assert.equal(document.info.version, "0.4.0");
   assert.ok(document.paths["/api/v1/identity"]);
   assert.ok(document.paths["/api/v1/project/brief"]);
   assert.ok(document.paths["/api/v1/project/my-work"]);
@@ -15,16 +15,48 @@ test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", (
   assert.ok(document.paths["/api/v1/project/review-queue"]);
   assert.ok(document.paths["/api/v1/project/unassigned"]);
   assert.ok(document.paths["/api/v1/project/blockers"]);
+  assert.ok(document.paths["/api/v1/project/item-relationships"]);
+  assert.ok(document.paths["/api/v1/project/bulk-plan"]);
   assert.ok(document.paths["/api/v1/write/status"]);
   assert.ok(document.paths["/api/v1/write/priority"]);
   assert.ok(document.paths["/api/v1/write/start-work"]);
   assert.ok(document.paths["/api/v1/write/assign"]);
   assert.ok(document.paths["/api/v1/write/capture-backlog"]);
   assert.ok(document.paths["/api/v1/write/create-work-item"]);
+  assert.ok(document.paths["/api/v1/write/relationship/add-sub-issue"]);
+  assert.ok(document.paths["/api/v1/write/relationship/remove-sub-issue"]);
+  assert.ok(document.paths["/api/v1/write/relationship/add-blocked-by"]);
+  assert.ok(document.paths["/api/v1/write/relationship/remove-blocked-by"]);
+  assert.ok(document.paths["/api/v1/write/bulk/preview"]);
+  assert.ok(document.paths["/api/v1/write/bulk/approve"]);
+  assert.ok(document.paths["/api/v1/write/bulk/apply"]);
   assert.deepEqual(document.components.schemas, {});
   assert.equal(document.components.securitySchemes.oauth2.flows.authorizationCode.authorizationUrl, "https://example.test/oauth/authorize");
   assert.equal(document.components.securitySchemes.oauth2.flows.authorizationCode.tokenUrl, "https://example.test/oauth/token");
   assert.deepEqual(document.paths["/api/v1/write/status"].post.security, [{ oauth2: ["projects:read", "projects:write"] }]);
+});
+
+test("OpenAPI exposes all M10 relationship and bulk operation IDs without secrets", () => {
+  const document = openApiDocument("https://example.test");
+  const operationIds = Object.values(document.paths).flatMap((path) =>
+    Object.values(path).flatMap((operation) => "operationId" in operation ? [operation.operationId] : []));
+  const expected = [
+    "get_github_project_item_relationships",
+    "add_github_project_sub_issue",
+    "remove_github_project_sub_issue",
+    "add_github_project_blocked_by",
+    "remove_github_project_blocked_by",
+    "preview_github_project_bulk_updates",
+    "approve_github_project_bulk_plan",
+    "apply_github_project_bulk_plan",
+    "get_github_project_bulk_plan",
+  ];
+  for (const operationId of expected) assert.ok(operationIds.includes(operationId), operationId);
+
+  const serialized = JSON.stringify(document);
+  for (const forbidden of ["client_secret", "access_token", "refresh_token", "authorization code", "cookie"]) {
+    assert.doesNotMatch(serialized.toLowerCase(), new RegExp(forbidden.replace(" ", "\\s+")));
+  }
 });
 
 test("OpenAPI tells actions not to blindly retry non-idempotent partial failures", () => {
@@ -44,7 +76,13 @@ test("OpenAPI tells actions not to blindly retry non-idempotent partial failures
 test("router serves OpenAPI without OAuth", async () => {
   const response = await handleRemoteHttpRequest(new Request("https://example.test/openapi.json"));
   assert.equal(response.status, 200);
-  const payload = await response.json() as { openapi?: string; servers?: Array<{ url?: string }> };
+  const payload = await response.json() as {
+    openapi?: string;
+    servers?: Array<{ url?: string }>;
+    paths?: Record<string, { post?: { operationId?: string } }>;
+  };
   assert.equal(payload.openapi, "3.1.0");
   assert.equal(payload.servers?.[0]?.url, "https://example.test");
+  assert.equal(payload.paths?.["/api/v1/write/bulk/apply"]?.post?.operationId, "apply_github_project_bulk_plan");
+  assert.equal(payload.paths?.["/api/v1/project/item-relationships"]?.post?.operationId, "get_github_project_item_relationships");
 });

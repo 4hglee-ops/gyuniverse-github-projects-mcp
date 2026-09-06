@@ -351,7 +351,7 @@ Four MCP tools accept one `{ owner, number, sourceItemId, targetItemId }` pair:
 - `add_github_project_sub_issue` / `remove_github_project_sub_issue`: source parent, target child.
 - `add_github_project_blocked_by` / `remove_github_project_blocked_by`: source blocked by target.
 
-Require an authenticated admin with `item.relationship.write`, existing Project permissions/allowlists and write gates. Both Issues must belong to the same authorized Project. Existing parents are never implicitly replaced; incomplete evidence or unproven cycle safety denies the operation. Both changed and no-change results require fresh M10-3 reciprocal verification and durable audit. Viewer relationship reads remain unchanged. No bulk or REST/Action relationship endpoints are added.
+Require an authenticated admin with `item.relationship.write`, existing Project permissions/allowlists and write gates. Both Issues must belong to the same authorized Project. Existing parents are never implicitly replaced; incomplete evidence or unproven cycle safety denies the operation. Both changed and no-change results require fresh M10-3 reciprocal verification and durable audit. Viewer relationship reads remain unchanged. The REST/GPT Actions adapter now exposes these same Shared Core operations through `/api/v1/project/item-relationships` and `/api/v1/write/relationship/*`.
 
 See [operations, audit compatibility and safe validation/cleanup](docs/M10_RELATIONSHIP_WRITES.md). Implementation is ready for review; Production write validation is pending. Pre-M10-4 audit readers need the new optional-metadata reader backported before rolling back after relationship records have been written.
 
@@ -389,6 +389,11 @@ Bulk self-approval remains compatible by default. Set
 Admin should approve. Preview, Approval and Apply recheck current capabilities;
 creator, approver and applier may be different identities. See
 [`docs/M10_RICHER_ACL.md`](docs/M10_RICHER_ACL.md).
+
+The GPT Actions OpenAPI document also exposes bulk Preview, Approval, Apply and
+Get routes. Updating a Custom GPT requires re-importing `/openapi.json` after the
+deployment containing those operation IDs; the existing OAuth scopes and client
+configuration remain unchanged.
 
 ## Safety model
 
