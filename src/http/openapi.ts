@@ -96,7 +96,7 @@ export function openApiDocument(baseUrl: string) {
     openapi: "3.1.0",
     info: {
       title: "Gyuniverse GitHub Projects Operator API",
-      version: "0.3.0",
+      version: "0.3.1",
       description: "Semantic REST adapter over the same Shared Core used by the Gyuniverse GitHub Projects MCP. Guarded writes share OAuth identity, Project membership, ACL, verification, and audit rules with MCP. Failed writes return action guidance; partial failures must not be blindly retried.",
     },
     servers: [{ url: base }],
@@ -165,6 +165,7 @@ export function openApiDocument(baseUrl: string) {
       },
     },
     components: {
+      schemas: {},
       securitySchemes: {
         oauth2: {
           type: "oauth2",

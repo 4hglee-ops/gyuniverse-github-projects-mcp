@@ -7,7 +7,7 @@ import { handleRemoteHttpRequest } from "./router.js";
 test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", () => {
   const document = openApiDocument("https://example.test");
   assert.equal(document.openapi, "3.1.0");
-  assert.equal(document.info.version, "0.3.0");
+  assert.equal(document.info.version, "0.3.1");
   assert.ok(document.paths["/api/v1/identity"]);
   assert.ok(document.paths["/api/v1/project/brief"]);
   assert.ok(document.paths["/api/v1/project/my-work"]);
@@ -21,6 +21,7 @@ test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", (
   assert.ok(document.paths["/api/v1/write/assign"]);
   assert.ok(document.paths["/api/v1/write/capture-backlog"]);
   assert.ok(document.paths["/api/v1/write/create-work-item"]);
+  assert.deepEqual(document.components.schemas, {});
   assert.equal(document.components.securitySchemes.oauth2.flows.authorizationCode.authorizationUrl, "https://example.test/oauth/authorize");
   assert.equal(document.components.securitySchemes.oauth2.flows.authorizationCode.tokenUrl, "https://example.test/oauth/token");
   assert.deepEqual(document.paths["/api/v1/write/status"].post.security, [{ oauth2: ["projects:read", "projects:write"] }]);
