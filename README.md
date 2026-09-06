@@ -39,6 +39,7 @@ This repository is intentionally narrower than a general GitHub MCP server. It f
 | `compare_github_project_state_checkpoint` | Compare current Project state with the latest configured checkpoint |
 | `get_github_project_brief_context` | Return snapshot + team-brief interpretation contract |
 | `list_github_project_write_audit_log` | Read recent bounded write audit metadata from the configured governance store |
+| `get_github_project_item_relationships` | Read native Issue parent/sub-issue and blocks/blocked-by evidence with same-Project authorization and explicit coverage |
 
 ### Checkpoint state
 

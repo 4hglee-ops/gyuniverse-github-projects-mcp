@@ -16,6 +16,8 @@ import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
 import { registerHighLevelReadTools } from "./high-level-read-tools.js";
 import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
+import { ProjectRelationshipService } from "../core/relationships/project-relationship-service.js";
+import { registerRelationshipTools } from "./relationship-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -40,6 +42,8 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   const auditService = new AuditService(200);
   const mutationService = new ProjectMutationService({ client, writePolicy, auditService });
   const resolveProject = projectService.resolveProject.bind(projectService);
+
+  registerRelationshipTools(server, new ProjectRelationshipService({ config, client, projects: projectService }));
 
   registerCheckpointTools({ server, changes: changeService, json });
   registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, principal, json });

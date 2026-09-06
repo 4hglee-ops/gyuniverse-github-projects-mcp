@@ -66,6 +66,41 @@ Write audit ownership now uses the same governance persistence selection as chec
 
 Production validation after merge must prove a safe reversible/no-change write creates an audit record, a later request can list it, and the same record remains after a Production redeploy with `persistence = upstash` and `survivesServerRestart = true`.
 
+### Production validation handoff
+
+The operator's “연결 및 CI 점검” handoff reports PR #41 merged and a safe `Todo → Todo` write on Project #2 Issue #4 verified. Audit record `write-ed406b9f-2426-454d-aa6f-8d02a6adb0fb` remained after Production redeploy with `persistence = upstash` and `survivesServerRestart = true`. This is accepted handoff evidence, not a new Production test performed by M10-3. The Project owner is `gyuniverse-hq`; actor login is `4hglee-ops`. Existing write configuration remains unchanged.
+
+## M10-3 Native relationship reads
+
+`get_github_project_item_relationships({ owner, number, itemId, first? })` reads one GitHub Issue Project item's native relationships through Shared Core. `first` defaults to 50 and is limited to 100 **per relationship connection**. No relationship mutation, new permissions, environment changes, or automatic blocker inference is introduced.
+
+The [GitHub GraphQL Issue reference](https://docs.github.com/en/graphql/reference/issues) defines `parent`, `subIssues`, `blocking`, and `blockedBy`. The adapter returns these as `parent`, `subIssues`, `blocks`, and `blockedBy` respectively:
+
+- `parent`: source Issue has target as parent.
+- `subIssues`: source Issue has target as a sub-issue.
+- `blocks`: source Issue blocks target.
+- `blockedBy`: source Issue is blocked by target.
+
+Each group has `targets` and `coverage`, including native `totalCount`, fetched/returned counts, withheld reasons, `hasNextPage`, and `complete`. A parent that exists but cannot be disclosed is **not** represented as absent: its count remains one with an empty target list and incomplete coverage. Targets use existing `itemId`, `contentId`, `contentType`, `repository`, `number`, `title`, `url`, and `state` names.
+
+### Authorization and bounded reads
+
+1. Resolve the Project through existing owner/Project allowlists, `project.read`, and principal Project membership checks before querying Issue content. Actor login never substitutes for Project owner.
+2. Scan up to ten 100-item Project pages to establish source and target membership. PR/Draft sources are unsupported; inaccessible source content fails closed. Missing source on an incomplete scan is `PROJECT_ITEM_LOOKUP_INCOMPLETE`, not “not found.”
+3. Fetch only related Issue IDs from the native relationship fields. Detailed target metadata comes exclusively from the authorized Project inventory and is returned only for allowed repository owners. OAuth callers share a server GitHub credential; arbitrary repository visibility must not be treated as the caller's authorization.
+4. Withhold external target details (including node IDs, repository names, titles and URLs). Report aggregate `outsideProject`, `membershipUnverified`, or `repositoryOwnerNotAllowed` counts. A capped scan or inaccessible Project content prevents an exhaustive outside-Project claim.
+5. Fetch the first bounded relationship page only. When `hasNextPage=true`, results are explicitly incomplete; this version has no continuation input. Larger Projects or relationship sets are not claimed exhaustive. Unknown GraphQL fields, permission failures and malformed data fail instead of becoming empty relationship lists.
+
+Relationships may involve closed Issues; presence alone does not prove an active blocker. `get_blockers` and `get_project_brief` continue to use their existing explicit Project-field evidence. Ordinary snapshots/checkpoints are unchanged. Calls span multiple reads and are not a transactional snapshot; concurrent GitHub changes can affect coverage, so re-read before making operational decisions.
+
+### Deployment validation plan (read-only)
+
+- Confirm Preview is Ready and the new MCP tool is advertised with `readOnlyHint=true`.
+- Using an authorized principal and `owner=gyuniverse-hq`, Project #2, resolve a known Issue's Project item ID and call the new tool. Empty relationships are valid only with explicit coverage.
+- On existing fixtures where available, compare native parent/sub-issue and dependency direction with GitHub; check closed Issue state and withheld external-Project counts. Do not create or modify relationships to manufacture test data without separate approval.
+- Verify unauthorized owner/Project and PR/Draft inputs fail, then re-run existing snapshot/brief/blocker reads. Confirm no GitHub writes or audit append were triggered.
+- After human merge and Production deployment, repeat the read-only checks before closing M10-3. Stop before merge; M10-4 writes and M10-5 bulk operations remain out of scope.
+
 ## Remaining
 
 - [x] M10-1 durable checkpoint store abstraction
@@ -73,8 +108,9 @@ Production validation after merge must prove a safe reversible/no-change write c
 - [x] M10-1 cross-instance restore regression tests
 - [x] M10-1 Production cross-request/redeploy validation
 - [x] M10-2 durable write audit implementation and regression coverage
-- [ ] M10-2 Production cross-request/redeploy validation
-- [ ] M10-3 dependency / sub-issue evidence
+- [x] M10-2 Production cross-request/redeploy validation (operator handoff above)
+- [x] M10-3 dependency / sub-issue evidence implementation and regression coverage
+- [ ] M10-3 Preview / Production relationship validation
 - [ ] M10-4 guarded relationship writes
 - [ ] M10-5 Bulk Preview → Approval → Apply
 - [ ] M10-6 richer ACL

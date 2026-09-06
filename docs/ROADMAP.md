@@ -198,10 +198,17 @@ Advanced Governance is implemented in bounded slices rather than one large mutat
 - [x] Preserve bounded newest-first retention and Project/item filters
 - [x] Fail closed on malformed stored payloads and audit persistence failures
 - [x] Cover memory, cross-instance restore, ordering, retention, filtering, and secret exclusion
-- [ ] Production cross-request/redeploy validation
+- [x] Production cross-request/redeploy validation (PR #41; operator handoff evidence in M10 documentation)
+
+### M10-3 Dependency / sub-issue reads
+- [x] Dedicated read-only MCP tool backed by Shared Core
+- [x] Native parent, sub-issue, blocks and blocked-by evidence
+- [x] Project/principal authorization, same-Project detail filtering and bounded coverage
+- [x] Regression tests; existing snapshot and blocker semantics preserved
+- [ ] Preview / Production relationship validation
 
 ### Remaining
-- [ ] M10-3 Dependency / sub-issue evidence reads
+- [ ] M10-3 deployment validation and close
 - [ ] M10-4 Guarded relationship writes
 - [ ] M10-5 Bulk Preview -> Approval -> Apply
 - [ ] M10-6 Richer ACL
