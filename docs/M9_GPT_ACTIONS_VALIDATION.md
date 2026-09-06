@@ -44,7 +44,7 @@ Use the deployed OpenAPI document:
 - Client ID: exact value configured as `GPT_ACTIONS_OAUTH_CLIENT_ID`
 - Client Secret: exact secret configured as `GPT_ACTIONS_OAUTH_CLIENT_SECRET`
 - Scope: `projects:read projects:write`
-- Token exchange: request body / `client_secret_post` when the editor offers that choice
+- Token exchange: `client_secret_basic` or `client_secret_post`
 
 Copy the callback URL shown by the GPT editor exactly. Supported Custom GPT callback shapes are:
 
@@ -62,60 +62,76 @@ Two client types intentionally coexist:
 
 Both produce the same signed OAuth access-token subject and therefore enter the same Identity / ACL boundary.
 
-## Live validation sequence
+## Production validation evidence — complete
 
-Use an Admin validation identity first.
+### 1. Admin individual identity read ✅
 
-### 1. Identity read
+Custom GPT Actions authenticated an individual Admin principal and returned:
 
-Invoke `getIdentityContext`.
+- subject: `user:admin-validation`
+- role: `admin`
+- GitHub login: `4hglee-ops`
+- Project membership: `PVT_kwDOEzfCi84BidwG`
+- Admin permissions including Project read/write and create/add/assign/status/priority/generic-field writes
 
-Expected:
+No credential material was returned.
 
-- authenticated individual subject
-- role = `admin`
-- expected GitHub login
-- Project #2 node ID in memberships
-- no credential material in the response
+### 2. Project read ✅
 
-### 2. Project read
-
-Invoke `getBacklog` or `getProjectBrief` for:
+`getBacklog` succeeded for:
 
 - owner: `gyuniverse-hq`
 - number: `2`
 
-Expected: 200 and evidence-backed Project data.
+Issue #10 / Project item `PVTI_lADOEzfCi84BidwGzg5ouUc` was confirmed in `Backlog`.
 
-### 3. Safe write
+### 3. Safe no-change write ✅
 
-Prefer an idempotent write against a known test item, for example set its current Status to the same current option.
+`updateWorkItemStatus` set the same item to its existing `Backlog` option.
 
-Expected response includes:
+Observed result:
 
-- `verified: true`
-- `actorId` equal to the authenticated subject
-- semantic `operation`
-- `outcome: no_change` or `success`
-- `auditId`
-- `auditPersistence: process-local`
+```text
+changed: false
+before: Backlog
+after: Backlog
+verified: true
+actorId: user:admin-validation
+operation: update_status
+outcome: no_change
+auditId: write-1
+auditPersistence: process-local
+```
 
-### 4. Read-after-write
+This confirms the Custom GPT path reuses the same Shared Core verification and actor-aware audit envelope as MCP.
 
-Re-read the same Project/item and verify the actual server state matches the action response.
+### 4. Read-after-write ✅
 
-### 5. Permission denial
+A second `getBacklog` call confirmed Issue #10 remained in `Backlog` after the no-change write.
 
-Reconnect as Member or Viewer and exercise an operation outside that role's permission set.
+### 5. Member role denial ✅
 
-Expected:
+The Custom GPT was re-authorized with the Member validation identity:
 
-- HTTP 403
-- stable `PERMISSION_DENIED` or membership error
-- `category: authorization`
-- `retryable: false`
-- actionable `userAction`
-- no mutation
+- subject: `user:member-validation`
+- role: `member`
+- Project membership: `PVT_kwDOEzfCi84BidwG`
+
+`assignWorkItem` was attempted for Issue #10. The operation is outside the Member permission set and was denied before mutation.
+
+Observed action error:
+
+```text
+code: PERMISSION_DENIED
+message: PERMISSION_DENIED: Principal 'user:member-validation' lacks permission 'item.assign'.
+category: authorization
+retryable: false
+userAction: Use an identity that has permission for this Project and operation, or ask an Admin/PM to perform it.
+```
+
+The GPT action surface did not expose the raw HTTP status field, but Production Vercel runtime logs independently confirmed `POST /api/v1/write/assign` returned HTTP `403` for these denied requests.
+
+A subsequent `getBacklog` read confirmed Issue #10 remained `Backlog` and had no assignee mutation.
 
 ## Retry safety
 
@@ -128,12 +144,15 @@ Do not blindly retry failed writes.
 
 ## Completion criteria
 
-M9 GPT Actions live validation is complete when all of the following are confirmed in Production:
+All M9 GPT Actions live-validation criteria are now confirmed in Production:
 
-- OpenAPI imports successfully into the GPT editor.
-- OAuth authorization completes with an individual identity.
-- one read operation succeeds.
-- one safe write succeeds or returns verified no-change.
-- same-operation `actorId` is correct.
-- read-after-write matches the action response.
-- one role-based denial returns the action-safe 403 envelope without mutation.
+- [x] OpenAPI imports successfully into the GPT editor.
+- [x] OAuth authorization completes with an individual identity.
+- [x] one read operation succeeds.
+- [x] one safe write returns verified no-change.
+- [x] same-operation `actorId` is correct.
+- [x] read-after-write matches the action response.
+- [x] one role-based denial returns the action-safe authorization envelope without mutation.
+- [x] Production runtime confirms HTTP 403 for the denied write.
+
+M9 is ready to close. Durable audit persistence remains intentionally deferred to M10.

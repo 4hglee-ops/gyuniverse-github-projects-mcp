@@ -11,7 +11,7 @@
 | M6 High-level Read | Complete | Brief / My Work / Backlog / Review / Blockers / Changes |
 | M7 Identity Foundation | Complete | Individual identity + permission model |
 | M8 High-level Write | Complete | Semantic write + idempotency + verify + audit |
-| M9 REST / GPT Actions | In progress | Operator GPT read/write adapter |
+| M9 REST / GPT Actions | Complete | Operator GPT read/write adapter |
 | M10 Advanced Governance | Planned | Durable state / Bulk / Sub-issue / Dependency |
 
 ## M4 ✅
@@ -140,8 +140,8 @@ High-level semantic writes are implemented in Shared Core and exposed through MC
 
 Iteration-specific write is not part of the initial Project #2 operating model.
 
-## M9 🟡
-Add a semantic REST/GPT Actions adapter that uses the same Shared Core as MCP.
+## M9 ✅
+Semantic REST/GPT Actions adapter is complete and uses the same Shared Core as MCP.
 
 ### Completed
 - [x] M9-1 OAuth-protected REST read adapter
@@ -155,14 +155,20 @@ Add a semantic REST/GPT Actions adapter that uses the same Shared Core as MCP.
 - [x] M9-5 Add confidential OAuth client compatibility for Custom GPT Actions
 - [x] M9-5 Support ChatGPT `/aip/g-.../oauth/callback` redirect patterns while preserving Remote MCP callback rules
 - [x] M9-5 Add GPT Actions OAuth/live-validation runbook without storing client secrets
+- [x] Configure Production GPT Actions OAuth client and verify confidential token-auth metadata
+- [x] Import `/openapi.json` into the Custom GPT editor; fix `components.schemas` editor compatibility
+- [x] Validate individual Admin identity read through Custom GPT Actions
+- [x] Validate Project read through Custom GPT Actions
+- [x] Validate safe no-change Status write with `verified=true`, correct `actorId`, audit metadata, and read-after-write consistency
+- [x] Validate Member role denial for `assignWorkItem`: `PERMISSION_DENIED`, authorization category, non-retryable, no mutation
+- [x] Confirm Production returned HTTP 403 for denied `/api/v1/write/assign` requests
 
-### Remaining
-- [ ] Configure `GPT_ACTIONS_OAUTH_CLIENT_ID` / `GPT_ACTIONS_OAUTH_CLIENT_SECRET` in Production
-- [ ] Import `/openapi.json` into the Custom GPT editor and complete OAuth
-- [ ] M9-5 Validate read action with an individual identity
-- [ ] M9-5 Validate safe no-change write and actor audit metadata
-- [ ] M9-5 Validate permission denial behavior through GPT Actions
-- [ ] M9-6 Final documentation / Production evidence / milestone close
+Production validation boundary:
+- Admin subject: `user:admin-validation`
+- Member subject: `user:member-validation`
+- Project: `PVT_kwDOEzfCi84BidwG`
+- Safe test item: Issue #10 / `PVTI_lADOEzfCi84BidwGzg5ouUc`
+- No OAuth access codes, client secrets, bearer tokens, or signing secrets are stored in docs.
 
 M9 architecture rule remains authoritative:
 
