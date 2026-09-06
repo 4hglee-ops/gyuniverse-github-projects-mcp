@@ -32,8 +32,20 @@ export class MemoryProjectCheckpointStore implements ProjectCheckpointStoreLike 
 }
 
 export interface RedisCheckpointClient {
-  get<T>(key: string): Promise<T | null>;
+  get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<unknown>;
+}
+
+function isProjectStateCheckpoint(value: unknown): value is ProjectStateCheckpoint {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ProjectStateCheckpoint>;
+  return (
+    candidate.version === 1 &&
+    typeof candidate.owner === "string" &&
+    Boolean(candidate.project) &&
+    typeof candidate.project?.number === "number" &&
+    Array.isArray(candidate.items)
+  );
 }
 
 export class RedisProjectCheckpointStore implements ProjectCheckpointStoreLike {
@@ -60,10 +72,13 @@ export class RedisProjectCheckpointStore implements ProjectCheckpointStoreLike {
   }
 
   async get(owner: string, projectNumber: number): Promise<ProjectStateCheckpoint | undefined> {
-    const value = await this.redis.get<ProjectStateCheckpoint>(this.key(owner, projectNumber));
-    if (!value) return undefined;
-    if (value.version !== 1 || value.owner.toLowerCase() !== owner.toLowerCase()) {
+    const value = await this.redis.get(this.key(owner, projectNumber));
+    if (value === null || value === undefined) return undefined;
+    if (!isProjectStateCheckpoint(value)) {
       throw new Error("DURABLE_CHECKPOINT_INVALID: Stored checkpoint payload failed validation.");
+    }
+    if (value.owner.toLowerCase() !== owner.toLowerCase()) {
+      throw new Error("DURABLE_CHECKPOINT_INVALID: Stored checkpoint owner mismatch.");
     }
     if (value.project.number !== projectNumber) {
       throw new Error("DURABLE_CHECKPOINT_INVALID: Stored checkpoint Project number mismatch.");
