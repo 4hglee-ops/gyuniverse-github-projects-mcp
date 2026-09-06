@@ -344,6 +344,17 @@ pnpm smoke:update-single-select -- <project-id> <item-id> <field-id> <option-id>
 
 Use the minimum mutation count necessary to prove behavior, then restore `GITHUB_PROJECTS_WRITE_ENABLED=false` and reduce the token back to read-only when no further write verification is planned.
 
+## Guarded relationship writes (M10-4)
+
+Four MCP tools accept one `{ owner, number, sourceItemId, targetItemId }` pair:
+
+- `add_github_project_sub_issue` / `remove_github_project_sub_issue`: source parent, target child.
+- `add_github_project_blocked_by` / `remove_github_project_blocked_by`: source blocked by target.
+
+Require an authenticated admin with `item.relationship.write`, existing Project permissions/allowlists and write gates. Both Issues must belong to the same authorized Project. Existing parents are never implicitly replaced; incomplete evidence or unproven cycle safety denies the operation. Both changed and no-change results require fresh M10-3 reciprocal verification and durable audit. Viewer relationship reads remain unchanged. No bulk or REST/Action relationship endpoints are added.
+
+See [operations, audit compatibility and safe validation/cleanup](docs/M10_RELATIONSHIP_WRITES.md). Implementation is ready for review; Production write validation is pending. Pre-M10-4 audit readers need the new optional-metadata reader backported before rolling back after relationship records have been written.
+
 ## Write audit log
 
 `list_github_project_write_audit_log` exposes the newest write records from the configured M10 governance store.

@@ -205,18 +205,25 @@ Advanced Governance is implemented in bounded slices rather than one large mutat
 - [x] Native parent, sub-issue, blocks and blocked-by evidence
 - [x] Project/principal authorization, same-Project detail filtering and bounded coverage
 - [x] Regression tests; existing snapshot and blocker semantics preserved
-- [ ] Preview / Production relationship validation
+- [x] Production raw tools/list and Issue #4 relationship read validation (viewer PKCE; complete empty result)
+
+### M10-4 Guarded relationship writes
+- [x] Four explicit single-edge native operations; no bulk or reparenting
+- [x] Admin-only relationship permission, existing write gates and same-Project endpoint resolution
+- [x] Bounded cycle/precondition checks and fresh normalized reciprocal verification
+- [x] Durable success/no-change/failure audit with bounded relationship metadata
+- [x] Core, HTTP MCP authorization/registration and durable audit regressions
+- [ ] Reviewed Production add/remove/no-change, cleanup and redeploy validation
 
 ### Remaining
-- [ ] M10-3 deployment validation and close
-- [ ] M10-4 Guarded relationship writes
+- [ ] M10-4 review / Production validation and close
 - [ ] M10-5 Bulk Preview -> Approval -> Apply
 - [ ] M10-6 Richer ACL
 - [ ] M10-7 Production validation / milestone close
 
 Iteration remains optional and is not reintroduced into Project #2 unless the operating model changes explicitly.
 
-See `M10_ADVANCED_GOVERNANCE.md`.
+See `M10_ADVANCED_GOVERNANCE.md` and `M10_RELATIONSHIP_WRITES.md`.
 
 ## Product direction
 Build an AI Project Operator, not a generic wrapper around every GitHub Projects API.

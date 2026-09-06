@@ -101,6 +101,14 @@ Relationships may involve closed Issues; presence alone does not prove an active
 - Verify unauthorized owner/Project and PR/Draft inputs fail, then re-run existing snapshot/brief/blocker reads. Confirm no GitHub writes or audit append were triggered.
 - After human merge and Production deployment, repeat the read-only checks before closing M10-3. Stop before merge; M10-4 writes and M10-5 bulk operations remain out of scope.
 
+### Production validation completed
+
+After PR #42 merge, direct authenticated HTTPS calls to `https://gyuniverse-github-projects-mcp.vercel.app/mcp` returned 32 tools including `get_github_project_item_relationships`. A legitimate PKCE read-scope session resolved to `gyuniverse-projects-team`, role `viewer`, `project.read`, `githubLogin=null` (separate from the admin connector session). Issue #4 in `gyuniverse-hq` Project #2 returned empty parent/subIssues/blocks/blockedBy groups, all `complete=true`; all ten Project items were covered without inaccessible items or additional pages. M10-3 is Production-validated. The stale connected tool catalog is not a server registration defect.
+
+## M10-4 Guarded relationship writes
+
+Implementation and local regression coverage are complete for four native single-edge mutations, guarded by a new admin-only `item.relationship.write` permission, same-Project membership, bounded cycle checks, normalized reciprocal re-read verification and durable audit. Production writes/cleanup and redeploy validation remain pending human review and merge. See [M10 relationship writes](M10_RELATIONSHIP_WRITES.md) for directions, limits, audit-reader rollback compatibility and the exact disposable-fixture cleanup plan. M10-5 is not started.
+
 ## Remaining
 
 - [x] M10-1 durable checkpoint store abstraction
@@ -110,8 +118,9 @@ Relationships may involve closed Issues; presence alone does not prove an active
 - [x] M10-2 durable write audit implementation and regression coverage
 - [x] M10-2 Production cross-request/redeploy validation (operator handoff above)
 - [x] M10-3 dependency / sub-issue evidence implementation and regression coverage
-- [ ] M10-3 Preview / Production relationship validation
-- [ ] M10-4 guarded relationship writes
+- [x] M10-3 Production raw MCP relationship validation
+- [x] M10-4 guarded relationship write implementation and regression coverage
+- [ ] M10-4 Production mutation/cleanup/redeploy validation
 - [ ] M10-5 Bulk Preview → Approval → Apply
 - [ ] M10-6 richer ACL
 - [ ] M10-7 final validation / close
