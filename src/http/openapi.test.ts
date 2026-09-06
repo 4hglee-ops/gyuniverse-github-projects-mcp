@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { openApiDocument } from "./openapi.js";
+import { handleRemoteHttpRequest } from "./router.js";
+
+test("OpenAPI advertises semantic read endpoints and OAuth scopes", () => {
+  const document = openApiDocument("https://example.test");
+  assert.equal(document.openapi, "3.1.0");
+  assert.ok(document.paths["/api/v1/identity"]);
+  assert.ok(document.paths["/api/v1/project/brief"]);
+  assert.ok(document.paths["/api/v1/project/my-work"]);
+  assert.ok(document.paths["/api/v1/project/backlog"]);
+  assert.ok(document.paths["/api/v1/project/review-queue"]);
+  assert.ok(document.paths["/api/v1/project/unassigned"]);
+  assert.ok(document.paths["/api/v1/project/blockers"]);
+  assert.equal(
+    document.components.securitySchemes.oauth2.flows.authorizationCode.authorizationUrl,
+    "https://example.test/oauth/authorize",
+  );
+  assert.equal(
+    document.components.securitySchemes.oauth2.flows.authorizationCode.tokenUrl,
+    "https://example.test/oauth/token",
+  );
+});
+
+test("router serves OpenAPI without OAuth", async () => {
+  const response = await handleRemoteHttpRequest(new Request("https://example.test/openapi.json"));
+  assert.equal(response.status, 200);
+  const payload = await response.json() as { openapi?: string; servers?: Array<{ url?: string }> };
+  assert.equal(payload.openapi, "3.1.0");
+  assert.equal(payload.servers?.[0]?.url, "https://example.test");
+});
