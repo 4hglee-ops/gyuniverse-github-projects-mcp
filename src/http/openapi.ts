@@ -21,14 +21,30 @@ const writeTargetSchema = {
   },
 } as const;
 
+const actionsOwnerProperty = {
+  type: "string", minLength: 1, maxLength: 100,
+  description: "Project owner. Never infer this from the authenticated githubLogin. Omit only when the server has exactly one authorized owner.",
+} as const;
+
+const friendlyReferenceDescription = "Prefer the Issue/pull request URL or number the user supplied. Never invent a Project item ID. A number without a repository must be unique inside the authorized Project.";
+
 const relationshipReadSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["owner", "number", "itemId"],
+  required: ["number"],
+  anyOf: [
+    { required: ["itemId"] },
+    { required: ["url"] },
+    { required: ["repository", "itemNumber"] },
+    { required: ["itemNumber"] },
+  ],
   properties: {
-    owner: { type: "string", minLength: 1, maxLength: 100 },
-    number: { type: "integer", minimum: 1 },
-    itemId: { type: "string", minLength: 1, maxLength: 256, description: "Source GitHub Project v2 item node ID." },
+    owner: actionsOwnerProperty,
+    number: { type: "integer", minimum: 1, description: "GitHub Project v2 number, not the Issue number." },
+    itemId: { type: "string", minLength: 1, maxLength: 256, description: "Existing exact GitHub Project v2 item node ID. Use only when known; do not invent one." },
+    url: { type: "string", format: "uri", maxLength: 2048, description: `Canonical GitHub Issue or pull request URL. ${friendlyReferenceDescription}` },
+    repository: { type: "string", pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", description: "Exact owner/repository paired with itemNumber." },
+    itemNumber: { type: "integer", minimum: 1, description: `Issue or pull request number. ${friendlyReferenceDescription}` },
     first: { type: "integer", minimum: 1, maximum: 100, default: 50 },
   },
 } as const;
@@ -36,12 +52,24 @@ const relationshipReadSchema = {
 const relationshipWriteSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["owner", "number", "sourceItemId", "targetItemId"],
+  required: ["number"],
+  allOf: [
+    { anyOf: [{ required: ["sourceItemId"] }, { required: ["sourceUrl"] },
+      { required: ["sourceRepository", "sourceNumber"] }, { required: ["sourceNumber"] }] },
+    { anyOf: [{ required: ["targetItemId"] }, { required: ["targetUrl"] },
+      { required: ["targetRepository", "targetNumber"] }, { required: ["targetNumber"] }] },
+  ],
   properties: {
-    owner: { type: "string", minLength: 1, maxLength: 100 },
-    number: { type: "integer", minimum: 1 },
-    sourceItemId: { type: "string", minLength: 1, maxLength: 256 },
-    targetItemId: { type: "string", minLength: 1, maxLength: 256 },
+    owner: actionsOwnerProperty,
+    number: { type: "integer", minimum: 1, description: "GitHub Project v2 number, not an Issue number." },
+    sourceItemId: { type: "string", minLength: 1, maxLength: 256, description: "Existing exact source Project item ID. Do not invent one." },
+    sourceUrl: { type: "string", format: "uri", maxLength: 2048, description: `Source GitHub Issue or pull request URL. ${friendlyReferenceDescription}` },
+    sourceRepository: { type: "string", pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", description: "Exact source owner/repository paired with sourceNumber." },
+    sourceNumber: { type: "integer", minimum: 1, description: `Source Issue or pull request number. ${friendlyReferenceDescription}` },
+    targetItemId: { type: "string", minLength: 1, maxLength: 256, description: "Existing exact target Project item ID. Do not invent one." },
+    targetUrl: { type: "string", format: "uri", maxLength: 2048, description: `Target GitHub Issue or pull request URL. ${friendlyReferenceDescription}` },
+    targetRepository: { type: "string", pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", description: "Exact target owner/repository paired with targetNumber." },
+    targetNumber: { type: "integer", minimum: 1, description: `Target Issue or pull request number. ${friendlyReferenceDescription}` },
   },
 } as const;
 
@@ -58,10 +86,10 @@ const bulkPlanReferenceSchema = {
 const bulkPreviewSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["owner", "number", "operations"],
+  required: ["number", "operations"],
   properties: {
-    owner: { type: "string", minLength: 1, maxLength: 100 },
-    number: { type: "integer", minimum: 1 },
+    owner: actionsOwnerProperty,
+    number: { type: "integer", minimum: 1, description: "GitHub Project v2 number, not an Issue number." },
     operations: {
       type: "array",
       minItems: 1,
@@ -69,9 +97,18 @@ const bulkPreviewSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["itemId", "field", "value"],
+        required: ["field", "value"],
+        anyOf: [
+          { required: ["itemId"] },
+          { required: ["url"] },
+          { required: ["repository", "number"] },
+          { required: ["number"] },
+        ],
         properties: {
-          itemId: { type: "string", minLength: 1, maxLength: 256 },
+          itemId: { type: "string", minLength: 1, maxLength: 256, description: "Existing exact Project item ID. Do not invent one." },
+          url: { type: "string", format: "uri", maxLength: 2048, description: `GitHub Issue or pull request URL. ${friendlyReferenceDescription}` },
+          repository: { type: "string", pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", description: "Exact owner/repository paired with this operation's number." },
+          number: { type: "integer", minimum: 1, description: `Issue or pull request number for this operation. ${friendlyReferenceDescription}` },
           field: { type: "string", enum: ["Status", "Priority"] },
           value: { type: "string", minLength: 1, maxLength: 256 },
         },
@@ -155,8 +192,8 @@ export function openApiDocument(baseUrl: string) {
     openapi: "3.1.0",
     info: {
       title: "Gyuniverse GitHub Projects Operator API",
-      version: "0.4.0",
-      description: "Semantic REST adapter over the same Shared Core used by the Gyuniverse GitHub Projects MCP. Guarded writes share OAuth identity, Project membership, ACL, verification, and audit rules with MCP. Failed writes return action guidance; partial failures must not be blindly retried.",
+      version: "0.5.0",
+      description: "Semantic REST adapter over the same Shared Core used by the Gyuniverse GitHub Projects MCP. GPT Actions should prefer user-supplied Issue/pull request URLs or numbers and must never invent internal Project item IDs or infer a Project owner from authenticated githubLogin. Friendly references resolve only inside the authorized Project. Guarded writes share OAuth identity, Project membership, ACL, verification, and audit rules with MCP.",
     },
     servers: [{ url: base }],
     paths: {
@@ -241,7 +278,7 @@ export function openApiDocument(baseUrl: string) {
           "add_github_project_sub_issue",
           "Add the target Issue as a sub-issue of the source Issue.",
           relationshipWriteSchema,
-          "Admin-only single-edge write. Requires same authorized Project membership, complete relationship evidence, global write gate, reciprocal verification and durable audit.",
+          `Admin-only single-edge write. ${friendlyReferenceDescription} Resolution stays inside the same authorized Project before the existing M10 service enforces complete relationship evidence, the global write gate, reciprocal verification and durable audit.`,
         ),
       },
       "/api/v1/write/relationship/remove-sub-issue": {
@@ -249,7 +286,7 @@ export function openApiDocument(baseUrl: string) {
           "remove_github_project_sub_issue",
           "Remove the target Issue from the source Issue's sub-issues.",
           relationshipWriteSchema,
-          "Admin-only single-edge write. Does not delete either Issue; requires reciprocal verification and durable audit.",
+          `Admin-only single-edge write. ${friendlyReferenceDescription} Does not delete either Issue; requires reciprocal verification and durable audit.`,
         ),
       },
       "/api/v1/write/relationship/add-blocked-by": {
@@ -257,7 +294,7 @@ export function openApiDocument(baseUrl: string) {
           "add_github_project_blocked_by",
           "Make the source Issue blocked by the target Issue.",
           relationshipWriteSchema,
-          "Admin-only single-edge write. Both Issues must be in the same authorized Project; requires cycle safety, verification and durable audit.",
+          `Admin-only single-edge write. ${friendlyReferenceDescription} Both Issues must be in the same authorized Project; requires cycle safety, verification and durable audit.`,
         ),
       },
       "/api/v1/write/relationship/remove-blocked-by": {
@@ -265,7 +302,7 @@ export function openApiDocument(baseUrl: string) {
           "remove_github_project_blocked_by",
           "Remove the source Issue's blocked-by relationship to the target Issue.",
           relationshipWriteSchema,
-          "Admin-only single-edge write. Requires reciprocal verification and durable audit; do not retry a failed mutation blindly.",
+          `Admin-only single-edge write. ${friendlyReferenceDescription} Requires reciprocal verification and durable audit; do not retry a failed mutation blindly.`,
         ),
       },
       "/api/v1/write/bulk/preview": {
@@ -273,7 +310,7 @@ export function openApiDocument(baseUrl: string) {
           "preview_github_project_bulk_updates",
           "Create an immutable preview for 1-20 Status/Priority updates in one authorized Project.",
           bulkPreviewSchema,
-          "Admin-only governance action. Stores an expiring plan but does not mutate GitHub. Requires bulk.preview, the underlying item capabilities, OAuth write scope and the global write gate.",
+          `Admin-only governance action. ${friendlyReferenceDescription} Every reference resolves before the immutable Preview is persisted. Preview stores an expiring plan but does not mutate GitHub and requires bulk.preview, underlying item capabilities, OAuth write scope and the global write gate.`,
         ),
       },
       "/api/v1/write/bulk/approve": {

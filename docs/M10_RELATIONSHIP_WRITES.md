@@ -4,7 +4,7 @@ M10-4 adds four MCP tools backed by `RelationshipWriteService`. M10-3 relationsh
 
 ## Native API mapping and direction
 
-All tools take `{ owner, number, sourceItemId, targetItemId }`. Both IDs must resolve to GitHub Issues in the **same authorized Project**, with allowed repository owners. Inputs do not accept arbitrary Issue URLs, arrays, relationship type switches, or extra fields.
+The MCP tools take `{ owner, number, sourceItemId, targetItemId }`. The REST/GPT Actions adapter additionally accepts flat source/target Issue or pull-request URL, repository-plus-number, or unique number-only references and resolves them to the same item-ID contract before calling this service. Both resolved IDs must be GitHub Issues in the **same authorized Project**, with allowed repository owners. Neither transport accepts arrays, relationship type switches, or extra fields, and the Shared Core mutation contract remains item-ID based.
 
 | MCP tool | GitHub mutation | Meaning |
 | --- | --- | --- |

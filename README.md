@@ -395,6 +395,35 @@ Get routes. Updating a Custom GPT requires re-importing `/openapi.json` after th
 deployment containing those operation IDs; the existing OAuth scopes and client
 configuration remain unchanged.
 
+### GPT Actions item references
+
+Relationship Actions and bulk Preview no longer require users to know internal
+`PVTI_...` Project item IDs. Existing exact item IDs remain valid, while Actions
+may resolve an item from a canonical Issue/pull-request URL, an exact
+`owner/repository` plus Issue/pull-request number, or a number alone when that
+number is unique within the authorized Project. For example:
+
+```text
+gyuniverse-hq Project #2에서
+Issue #9를 Issue #8의 sub-issue로 추가해줘.
+```
+
+Resolution inventories only the Project that has already passed the owner
+allowlist, Project allowlist and authenticated membership checks. It never
+searches an arbitrary repository and assumes Project membership. In a
+multi-repository Project, duplicate numbers fail with
+`PROJECT_ITEM_REFERENCE_AMBIGUOUS`; supply the Issue/pull-request URL or exact
+repository plus number instead. Unknown references fail with
+`PROJECT_ITEM_NOT_FOUND`, and incomplete Project coverage fails closed.
+
+The Project owner is not the authenticated actor's `githubLogin`. Actions should
+send it explicitly. The server accepts an omitted owner only when exactly one
+owner is configured in the authorized allowlist; otherwise it returns
+`PROJECT_OWNER_REQUIRED`. Bulk references are resolved before the immutable
+Preview is stored, so a resolution failure creates no plan and performs no
+GitHub mutation. Approval, Apply and Get continue to use only `planId` plus
+`planDigest`.
+
 ## Safety model
 
 ### Owner allowlist
