@@ -107,7 +107,17 @@ After PR #42 merge, direct authenticated HTTPS calls to `https://gyuniverse-gith
 
 ## M10-4 Guarded relationship writes
 
-Implementation and local regression coverage are complete for four native single-edge mutations, guarded by a new admin-only `item.relationship.write` permission, same-Project membership, bounded cycle checks, normalized reciprocal re-read verification and durable audit. Production writes/cleanup and redeploy validation remain pending human review and merge. See [M10 relationship writes](M10_RELATIONSHIP_WRITES.md) for directions, limits, audit-reader rollback compatibility and the exact disposable-fixture cleanup plan. M10-5 is not started.
+Implementation and local regression coverage are complete for four native single-edge mutations, guarded by a new admin-only `item.relationship.write` permission, same-Project membership, bounded cycle checks, normalized reciprocal re-read verification and durable audit. The operator handoff confirms the reviewed Production validation and cleanup were completed; M10-4 is closed. See [M10 relationship writes](M10_RELATIONSHIP_WRITES.md) for directions, limits and audit compatibility.
+
+## M10-5 Bulk Preview → Approval → Apply
+
+The first bounded slice implements immutable, expiring and durable plans for 1–20
+Status/Priority updates in one Project. The creating Admin explicitly approves the
+same digest before a full all-item preflight and a CAS-protected single-use Apply.
+Preflight failures perform zero writes; runtime failures stop remaining operations
+and become terminal `failed`/`partial` results without retry or rollback. Existing
+durable item audits receive optional `planId` correlation and the plan stores
+separate bounded lifecycle events. See [M10 bulk plans](M10_BULK_PLANS.md).
 
 ## Remaining
 
@@ -120,7 +130,8 @@ Implementation and local regression coverage are complete for four native single
 - [x] M10-3 dependency / sub-issue evidence implementation and regression coverage
 - [x] M10-3 Production raw MCP relationship validation
 - [x] M10-4 guarded relationship write implementation and regression coverage
-- [ ] M10-4 Production mutation/cleanup/redeploy validation
-- [ ] M10-5 Bulk Preview → Approval → Apply
+- [x] M10-4 Production mutation/cleanup/redeploy validation (operator handoff evidence)
+- [x] M10-5 implementation and local regression coverage
+- [ ] M10-5 review / Production validation
 - [ ] M10-6 richer ACL
 - [ ] M10-7 final validation / close

@@ -27,6 +27,17 @@ export interface NamedSingleSelectUpdateInput {
   itemId: string;
   fieldName: string;
   optionName: string;
+  expectedFieldId?: string;
+  expectedCurrentOptionId?: string | null;
+  expectedTargetOptionId?: string;
+}
+
+export interface NamedSingleSelectPreview {
+  project: { id: string; number: number; title: string | null };
+  itemId: string;
+  field: { id: string; name: string };
+  requestedOption: SingleSelectOption;
+  current: SingleSelectOption | null;
 }
 
 export interface NamedSingleSelectUpdateResult {
@@ -180,11 +191,24 @@ export async function updateProjectSingleSelectByName(
   client: GitHubGraphQlClient,
   input: NamedSingleSelectUpdateInput,
 ): Promise<NamedSingleSelectUpdateResult> {
-  const fields = await listProjectFields(client, input.owner, input.projectNumber);
-  const { field, option } = resolveSingleSelectField(fields, input.fieldName, input.optionName);
-
-  const beforeContext = await getProjectItemFieldContext(client, input.itemId, input.fieldName);
-  assertItemInProject(beforeContext, input.projectId);
+  const preview = await inspectProjectSingleSelectByName(client, input);
+  const field = preview.field;
+  const option = preview.requestedOption;
+  const beforeContext = {
+    itemId: preview.itemId,
+    projectId: preview.project.id,
+    projectNumber: preview.project.number,
+    projectTitle: preview.project.title,
+    current: preview.current,
+  };
+  if (("expectedFieldId" in input && field.id !== input.expectedFieldId) ||
+      ("expectedTargetOptionId" in input && option.id !== input.expectedTargetOptionId)) {
+    throw new Error(`PLAN_STALE: '${input.fieldName}' configuration changed after bulk preflight.`);
+  }
+  if ("expectedCurrentOptionId" in input &&
+      (beforeContext.current?.id ?? null) !== input.expectedCurrentOptionId) {
+    throw new Error(`PLAN_STALE: '${input.fieldName}' changed after bulk preflight.`);
+  }
 
   if (beforeContext.current?.id === option.id) {
     return {
@@ -231,5 +255,22 @@ export async function updateProjectSingleSelectByName(
     before: beforeContext.current,
     after: afterContext.current,
     mutationSkippedReason: null,
+  };
+}
+
+export async function inspectProjectSingleSelectByName(
+  client: GitHubGraphQlClient,
+  input: NamedSingleSelectUpdateInput,
+): Promise<NamedSingleSelectPreview> {
+  const fields = await listProjectFields(client, input.owner, input.projectNumber);
+  const { field, option } = resolveSingleSelectField(fields, input.fieldName, input.optionName);
+  const context = await getProjectItemFieldContext(client, input.itemId, input.fieldName);
+  assertItemInProject(context, input.projectId);
+  return {
+    project: { id: input.projectId, number: input.projectNumber, title: context.projectTitle },
+    itemId: context.itemId,
+    field: { id: field.id, name: field.name },
+    requestedOption: option,
+    current: context.current,
   };
 }

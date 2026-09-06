@@ -122,3 +122,16 @@ test("malformed optional relationship metadata fails closed in durable storage",
     await assert.rejects(() => store.list(), /DURABLE_AUDIT_INVALID/);
   }
 });
+
+test("bulk plan correlation is bounded, durable, and backwards compatible", async () => {
+  const redis = new FakeRedisAuditClient();
+  const store = new RedisWriteAuditStore(redis);
+  await store.append(base);
+  await store.append({ ...base, planId: `bulk-plan-${"a".repeat(200)}` });
+  const restored = await new RedisWriteAuditStore(redis).list();
+  assert.equal(restored[0]?.planId?.length, 128);
+  assert.equal(restored[1]?.planId, undefined);
+  const malformed = JSON.parse(String(redis.values.values().next().value?.[0]));
+  redis.values.set("gyuniverse:m10:audit:v1:entries", [JSON.stringify({ ...malformed, planId: { secret: "value" } })]);
+  await assert.rejects(() => store.list(), /DURABLE_AUDIT_INVALID/);
+});

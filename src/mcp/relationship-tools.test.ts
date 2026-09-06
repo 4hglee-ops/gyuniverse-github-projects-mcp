@@ -48,6 +48,9 @@ test("MCP advertises read-only relationships, invokes Shared Core, and preserves
     for (const name of ["get_blockers", "get_project_brief", "get_github_project_snapshot", "list_github_project_write_audit_log"]) {
       assert.ok(listing.tools.some((tool) => tool.name === name), name);
     }
+    for (const name of ["preview_github_project_bulk_updates", "approve_github_project_bulk_plan", "apply_github_project_bulk_plan", "get_github_project_bulk_plan"]) {
+      assert.ok(listing.tools.some((tool) => tool.name === name), name);
+    }
     const result = z.object({ content: z.array(z.object({ text: z.string() })), isError: z.boolean().optional() }).parse(await request("tools/call", {
       name: "get_github_project_item_relationships", arguments: { owner: "gyuniverse-hq", number: 2, itemId: "ITEM" },
     }));

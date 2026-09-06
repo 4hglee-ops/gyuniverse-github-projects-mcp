@@ -167,3 +167,18 @@ test("fails closed when post-mutation verification does not match the requested 
   );
   assert.equal(client.mutationCount, 1);
 });
+
+test("bulk expected field, before option and target option mismatches fail before mutation", async () => {
+  for (const expectation of [
+    { expectedFieldId: "OLD_FIELD", expectedCurrentOptionId: "OPT_TODO", expectedTargetOptionId: "OPT_PROGRESS" },
+    { expectedFieldId: "FIELD_STATUS", expectedCurrentOptionId: "OLD_VALUE", expectedTargetOptionId: "OPT_PROGRESS" },
+    { expectedFieldId: "FIELD_STATUS", expectedCurrentOptionId: "OPT_TODO", expectedTargetOptionId: "OLD_TARGET" },
+  ]) {
+    const client = new UpdateClient();
+    await assert.rejects(
+      () => updateProjectSingleSelectByName(client, { ...input, ...expectation }),
+      /PLAN_STALE/,
+    );
+    assert.equal(client.mutationCount, 0);
+  }
+});
