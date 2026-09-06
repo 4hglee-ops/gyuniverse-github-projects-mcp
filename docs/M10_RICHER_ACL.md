@@ -101,9 +101,24 @@ Legacy entries without it remain readable. The allowlisted schema still excludes
 tokens, access codes, client secrets, Authorization headers, cookies and raw
 credential/request payloads.
 
+## Production closeout
+
+M10-6 is Production-validated and complete. PR #47 merge `a24764b` reached a
+matching `READY` Production deployment. The Production Admin identity exposed all
+relationship and bulk capabilities, read the allowlisted `gyuniverse-hq` Project
+#2 with actor login `4hglee-ops`, and retained access to durable Upstash audit,
+checkpoint, and bulk correlation evidence. The closeout intentionally performed
+no relationship mutation and no bulk Apply.
+
+The 236-test suite covers Viewer/Member runtime authorization and existing Member
+single-item compatibility. Direct Viewer/Member Production OAuth reconnection was
+not available during the minimal smoke and is recorded for M10-7 follow-up rather
+than treated as an M10-6 blocker.
+
 ## Deliberate exclusions
 
 No role-management UI, arbitrary custom roles, external IAM, organization sync,
 dynamic delegation, bulk relationship writes, rollback/resume, or new mutation
-types are introduced. Production matrix/maker-checker validation and final M10
-closure remain M10-7 work.
+types are introduced. Viewer/Member role-specific Production OAuth smoke,
+distinct-Admin two-identity validation, and final milestone closure remain M10-7
+work.

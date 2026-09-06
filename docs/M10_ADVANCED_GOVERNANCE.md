@@ -134,6 +134,27 @@ owner/Project allowlists, identity membership and current capability. Optional
 distinct-Admin approval is available without changing the default individual
 workflow. See [M10 richer ACL](M10_RICHER_ACL.md).
 
+### Production validation completed
+
+PR #47 was merged as `a24764b` and the matching Production deployment reached
+`READY`. The connected `user:admin-validation` identity retained
+`githubLogin=4hglee-ops`, Project membership for `PVT_kwDOEzfCi84BidwG`, and all
+four M10-6 Admin capabilities: `item.relationship.write`, `bulk.preview`,
+`bulk.approve`, and `bulk.apply`. It successfully read `gyuniverse-hq` Project #2,
+proving that actor login was not substituted for the Project owner.
+
+Existing durable write audit entries remained available with
+`persistence=upstash` and `survivesServerRestart=true`. The original checkpoint
+created at `2026-09-06T12:49:18.491Z` also remained readable from Upstash without
+replacement, and existing bulk-correlated audit entries retained their `planId`.
+No relationship mutation or bulk Apply was repeated for this smoke.
+
+The 236-test regression suite supplies the Viewer/Member/Admin permission matrix,
+runtime denial, Member safe single-item compatibility, Project boundary, and
+maker-checker coverage. Viewer/Member role-specific Production OAuth smoke is
+explicitly deferred to M10-7 because those OAuth identities were not connected.
+This follow-up does not block M10-6 completion.
+
 ## Remaining
 
 - [x] M10-1 durable checkpoint store abstraction
@@ -149,5 +170,5 @@ workflow. See [M10 richer ACL](M10_RICHER_ACL.md).
 - [x] M10-5 implementation and local regression coverage
 - [x] M10-5 review / Production validation
 - [x] M10-6 richer ACL implementation and regression coverage
-- [ ] M10-6 review / Production validation
+- [x] M10-6 review / Production validation
 - [ ] M10-7 final validation / close
