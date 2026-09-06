@@ -59,6 +59,22 @@ test("OpenAPI exposes all M10 relationship and bulk operation IDs without secret
   }
 });
 
+test("every OpenAPI operation description is at most 300 characters", () => {
+  const document = openApiDocument("https://example.test");
+  for (const [path, pathItem] of Object.entries(document.paths)) {
+    for (const [method, operation] of Object.entries(pathItem)) {
+      if (!("operationId" in operation)) continue;
+      const description = "description" in operation && typeof operation.description === "string"
+        ? operation.description
+        : "";
+      assert.ok(
+        description.length <= 300,
+        `${operation.operationId} ${method.toUpperCase()} ${path}: ${description.length} characters`,
+      );
+    }
+  }
+});
+
 test("OpenAPI teaches GPT Actions to use friendly Project item references without inventing IDs or owners", () => {
   const document = openApiDocument("https://example.test");
   type ActionSchema = { required: readonly string[]; properties: Record<string, { description: string }> };
