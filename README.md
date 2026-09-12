@@ -1,120 +1,491 @@
-# gyuniverse-github-projects-mcp
+<div align="center">
 
-Focused MCP server for safe GitHub Projects v2 team workflows.
+<img src="./assets/gyuniverse-github-projects-mcp-banner.jpg" alt="Gyuniverse GitHub Projects MCP" width="100%" />
 
-This repository is intentionally narrower than a general GitHub MCP server. It focuses on Projects metadata, fields, items, normalized team-state snapshots, workflow reconciliation, checkpoint/delta analysis, guarded workflow mutations, write auditing, and an authenticated remote MCP surface.
+<br/>
 
-## Status
+<p>
+  <img src="https://img.shields.io/badge/GitHub%20Projects-v2-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Projects v2" />
+  <img src="https://img.shields.io/badge/MCP-Remote%20HTTP-111111?style=for-the-badge" alt="Remote MCP" />
+  <img src="https://img.shields.io/badge/OAuth-PKCE-4A90E2?style=for-the-badge" alt="OAuth PKCE" />
+  <img src="https://img.shields.io/badge/ChatGPT-Compatible-10A37F?style=for-the-badge&logo=openai&logoColor=white" alt="ChatGPT Compatible" />
+  <img src="https://img.shields.io/badge/Claude-Compatible-D97757?style=for-the-badge" alt="Claude Compatible" />
+</p>
 
-**v0.3 / M3 complete + M4 Project Operating Foundation in progress**
+<p>
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/GraphQL-GitHub-7A1FA2?style=flat-square&logo=graphql&logoColor=white" alt="GraphQL" />
+  <img src="https://img.shields.io/badge/Deploy-Vercel-000000?style=flat-square&logo=vercel&logoColor=white" alt="Vercel" />
+  <img src="https://img.shields.io/badge/Store-Upstash-00C98D?style=flat-square" alt="Upstash" />
+  <img src="https://img.shields.io/badge/Safety-Guarded%20Writes-2EA44F?style=flat-square" alt="Guarded Writes" />
+</p>
 
-- M1 local Projects MCP complete
-- M2 workflow intelligence complete
-- Remote HTTP request router implemented
-- OAuth protected-resource / authorization-server discovery implemented
-- Public PKCE client registration and authorization flow implemented
-- ChatGPT / Claude callback allowlist support
-- OAuth `projects:read` / `projects:write` separation
-- GitHub credential remains server-side only
-- Remote writes require OAuth write scope **and** the existing server-side write gates
-- Node and Vercel HTTP adapters implemented and live-read validated
-- M4 Project #2 inspection and guarded operating-foundation setup available
-- No delete tools
+**GitHub Projects → Safe AI Operations → Better Team Execution**  
+ChatGPT, Claude 같은 AI 클라이언트가 GitHub Projects v2를 **조회·분석·변경·검증·감사**할 수 있도록 연결하는 production-oriented MCP server입니다.
 
-## MCP tools
+[⚡ Quick Start](#-quick-start) · [✨ Features](#-features) · [💡 Use Cases](#-use-cases) · [🛡 Safe Operations](#-safe-operations) · [🏗 Architecture](#-architecture) · [📚 Docs](#-docs)
 
-### GitHub read / analysis
+</div>
 
-| Tool | Purpose |
-| --- | --- |
-| `list_github_projects` | List Projects for an allowed user or organization |
-| `get_github_project` | Read one Project by owner + project number |
-| `list_github_project_fields` | Read Status, Priority, Iteration and other fields/options |
-| `list_github_project_items` | Read issues, PRs, draft items and field values |
-| `resolve_github_issue_or_pr_url` | Resolve a GitHub Issue/PR URL to stable content metadata and node ID |
-| `resolve_github_project_item` | Resolve an Issue/PR URL to its matching Project item with cursor pagination |
-| `get_github_project_snapshot` | Normalize project state for AI analysis |
-| `analyze_github_project_state_gaps` | Detect missing Status and missing assignee state gaps |
-| `analyze_github_project_reconciliation` | Detect PR merge ↔ Project Status mismatches |
-| `compare_github_project_state_checkpoint` | Compare current Project state with the latest configured checkpoint |
-| `get_github_project_brief_context` | Return snapshot + team-brief interpretation contract |
-| `list_github_project_write_audit_log` | Read recent bounded write audit metadata from the configured governance store |
-| `get_github_project_item_relationships` | Read native Issue parent/sub-issue and blocks/blocked-by evidence with same-Project authorization and explicit coverage |
+---
 
-### Checkpoint state
+## 👀 At a glance
 
-| Tool | Purpose |
-| --- | --- |
-| `create_github_project_state_checkpoint` | Capture the current allowed Project snapshot as the comparison baseline |
+<table>
+<tr>
+<td width="33%" valign="top">
 
-Creating a checkpoint **does not write to GitHub**. It replaces the previous checkpoint for the same owner + Project number. Production uses the configured Upstash governance store; local development may use process memory.
+### 📊 Understand Project State
 
-A comparison can report Status, Priority, assignee, repository state, merge state, archive state, custom field, metadata, and snapshot-membership changes. Comparison does not silently replace the baseline; create a new checkpoint explicitly when the current state should become the new baseline.
+Project item, Status, Priority, assignee, relationship, 변경 사항을 읽고 현재 팀 상태를 구조화합니다.
 
-Current normalized snapshots request at most 100 items. When a snapshot reaches that requested limit, entered/left membership changes are treated as snapshot-window observations rather than authoritative proof of Project add/remove events.
+</td>
+<td width="33%" valign="top">
 
-### GitHub write — disabled by default
+### 🛡 Operate Safely
 
-Preferred high-level workflow tools:
+권한과 allowlist, write gate, precondition, re-read verification을 거쳐 안전하게 Project를 변경합니다.
 
-| Tool | Purpose |
-| --- | --- |
-| `update_github_project_item_status` | Set one Project item's exact Status option by name with Project-membership and post-write verification |
-| `update_github_project_item_priority` | Set one Project item's exact Priority option by name with Project-membership and post-write verification |
+</td>
+<td width="33%" valign="top">
 
-Lower-level compatibility tools:
+### 🧾 Track Changes
 
-| Tool | Purpose |
-| --- | --- |
-| `add_github_project_item` | Add an existing Issue/PR node to a Project |
-| `update_github_project_item_field` | Update text/number/date/single-select/multi-select/iteration fields by node IDs |
+Checkpoint / delta와 durable audit를 이용해 변경 전후와 실행 결과를 추적합니다.
 
-There are intentionally **no delete tools**.
-
-The high-level Status/Priority tools should be preferred for AI workflows because they do not require the model to provide raw field and option IDs. They:
-
-1. resolve the allowed Project from owner + Project number
-2. require the existing write gate and explicit Project allowlist
-3. resolve the exact `Status`/`Priority` single-select field and exact option name
-4. query `ProjectV2Item.project` and reject a mismatched item before mutation
-5. skip the mutation if the requested value is already set
-6. perform one field mutation when needed
-7. re-read the item and field after mutation
-8. fail if the post-write value does not match
-9. append a structured write-audit record
-
-## Why a dedicated Projects MCP?
+</td>
+</tr>
+</table>
 
 ```text
-ChatGPT / Claude / Codex
-          |
-          | OAuth access token
-          v
- Remote GitHub Projects MCP
-          |
-          | server-side GitHub credential
-          v
-   GitHub Projects v2 API
+ChatGPT / Claude / other MCP clients
+                │
+          OAuth / Remote MCP
+                ▼
+     Gyuniverse GitHub Projects MCP
+                │
+       ┌────────┼────────┐
+       │        │        │
+     Read    Safe Write  Governance
+       │        │        │
+       ├─ State │        ├─ Checkpoint / Delta
+       ├─ Gap   ├─ Status / Priority
+       ├─ Brief ├─ Item / Assignment
+       └─ Relation      ├─ Relationship
+                         └─ Bulk Preview → Approval → Apply
+                │
+                ▼
+        GitHub Projects v2
 ```
 
-The OAuth token issued to an AI client is **not** the GitHub PAT / GitHub App credential. The GitHub credential remains on the server and is never returned through OAuth.
+> **핵심 목표**  
+> GitHub Projects를 단순 API wrapper가 아니라, AI가 실제 팀 운영에 활용할 수 있는 **safe project operations layer**로 만드는 것.
 
-General GitHub tooling can continue to handle repository code, Issues, Pull Requests, reviews, and Actions. This server owns the Projects-specific workflow/state layer.
+---
 
-## Requirements
+## ✨ Features
+
+| Status | 기능 | 설명 |
+| :---: | --- | --- |
+| ✅ | Project / field / item 조회 | Projects v2 메타데이터와 현재 field 값을 읽음 |
+| ✅ | Workflow intelligence | missing Status / assignee, PR merge ↔ Project 상태 불일치 탐지 |
+| ✅ | Project brief | normalized snapshot 기반 팀 상태 브리핑 |
+| ✅ | Checkpoint / delta | 기준선을 저장하고 이후 변경 사항 비교 |
+| ✅ | Guarded Status / Priority | semantic high-level write + post-write verification |
+| ✅ | Work item operations | backlog capture, item 생성, assignment 등 high-level workflow 지원 |
+| ✅ | Relationship read | parent / sub-issue / blocks / blocked-by 조회 |
+| ✅ | Guarded relationship write | admin-only 관계 추가 / 제거 + reciprocal verification |
+| ✅ | Bulk governance | immutable Preview → Approval → Apply workflow |
+| ✅ | Durable audit | Production에서 Upstash 기반 bounded write audit |
+| ✅ | Role-based ACL | Viewer / Member / Admin + capability 기반 runtime authorization |
+| ✅ | Remote OAuth MCP | OAuth discovery, DCR, PKCE, read/write scope separation |
+| ✅ | GPT Actions adapter | Shared Core 위에 REST/OpenAPI adapter 제공 |
+
+### Intentionally Guarded
+
+이 서버는 AI가 GitHub Projects를 수정할 수 있게 하지만, **tool이 보인다는 이유만으로 write 권한이 생기지 않습니다.**
+
+```text
+Tool discovery
+    ≠
+Authorization
+```
+
+실제 mutation은 OAuth scope, identity, Project membership, role/capability, owner/Project allowlist, server write gate와 각 operation의 검증을 모두 통과해야 합니다.
+
+파괴적인 delete 계열 도구는 의도적으로 제공하지 않습니다.
+
+---
+
+## ⚡ Quick Start
+
+### Production Endpoint
+
+```text
+https://gyuniverse-github-projects-mcp.vercel.app/mcp
+```
+
+GPT Actions OpenAPI:
+
+```text
+https://gyuniverse-github-projects-mcp.vercel.app/openapi.json
+```
+
+| Client | Connection | Authentication | Server support |
+| --- | --- | --- | :---: |
+| ChatGPT connector | Remote MCP | OAuth + PKCE | ✅ |
+| Custom GPT | GPT Actions / OpenAPI | OAuth | ✅ |
+| Claude Code | Remote HTTP MCP | OAuth | ✅ |
+| Claude Chat / compatible connector | Remote MCP | OAuth + DCR + PKCE | ✅ |
+
+> 실제 read/write 사용 가능 범위는 연결한 클라이언트의 기능과 발급된 OAuth scope, 서버의 ACL / write gate 설정에 따라 달라집니다.
+
+<details>
+<summary><b>🟢 Remote MCP 연결</b></summary>
+
+<br/>
+
+MCP Server URL:
+
+```text
+https://gyuniverse-github-projects-mcp.vercel.app/mcp
+```
+
+서버는 OAuth protected-resource / authorization-server discovery, public DCR, PKCE S256 흐름을 제공합니다.
+
+기본 scope:
+
+```text
+projects:read
+```
+
+write가 서버에서 활성화된 경우 사용할 수 있는 추가 scope:
+
+```text
+projects:write
+```
+
+</details>
+
+<details>
+<summary><b>🟢 Custom GPT / GPT Actions 연결</b></summary>
+
+<br/>
+
+OpenAPI schema:
+
+```text
+https://gyuniverse-github-projects-mcp.vercel.app/openapi.json
+```
+
+GPT Actions용 REST adapter도 MCP와 동일한 Shared Core, authorization, verification, audit 경계를 사용합니다.
+
+</details>
+
+<details>
+<summary><b>🛠 Local stdio 개발</b></summary>
+
+<br/>
+
+```bash
+git clone https://github.com/4hglee-ops/gyuniverse-github-projects-mcp.git
+cd gyuniverse-github-projects-mcp
+pnpm install
+cp .env.example .env
+pnpm mcp:stdio
+```
+
+최소 read-only 예시:
+
+```dotenv
+GITHUB_TOKEN=github_pat_...
+GITHUB_PROJECTS_ALLOWED_OWNERS=4hglee-ops,gyuniverse-hq
+GITHUB_PROJECTS_WRITE_ENABLED=false
+```
+
+</details>
+
+---
+
+## 💡 Use Cases
+
+### 현재 프로젝트 상태 브리핑
+
+```text
+gyuniverse-hq Project #2의 현재 상태를
+진행 중 / Review / Blocker / 담당자 없는 작업으로 정리해줘.
+```
+
+### Project 상태 이상 탐지
+
+```text
+merge된 PR과 GitHub Project Status가 어긋난 항목을 찾아줘.
+```
+
+### 변경 추적
+
+```text
+Project #2를 checkpoint와 비교해서
+Status, Priority, assignee, relationship이 달라진 항목만 보여줘.
+```
+
+### Status / Priority 변경
+
+```text
+Issue #14의 Priority를 P0로 변경하고 결과를 다시 확인해줘.
+```
+
+### Relationship 조회 / 변경
+
+```text
+Issue #8과 #9의 parent / sub-issue 및 dependency 관계를 조회해줘.
+```
+
+```text
+Issue #9를 Issue #8의 sub-issue로 추가한 뒤 reciprocal state를 다시 검증해줘.
+```
+
+### Bulk 변경
+
+```text
+이 작업들의 Status / Priority 변경안을 먼저 Preview해줘.
+아직 GitHub에는 적용하지 마.
+```
+
+이후 승인된 plan만 Apply할 수 있습니다.
+
+---
+
+## 🧠 Why this exists
+
+팀이 GitHub Projects를 운영하다 보면 이런 질문이 반복됩니다.
+
+```text
+"지금 실제로 진행 중인 작업은 뭐지?"
+"PR은 merge됐는데 왜 Project는 아직 In Progress지?"
+"이 Issue가 다른 작업을 막고 있나?"
+"AI에게 상태 변경을 맡겨도 안전할까?"
+"AI가 바꾼 내용을 나중에 확인할 수 있나?"
+```
+
+Gyuniverse GitHub Projects MCP는 Project 상태를 AI가 읽기 쉬운 형태로 정규화하고, 변경이 필요한 경우에는 명시적인 안전 경계를 거쳐 실제 GitHub operation을 수행합니다.
+
+```text
+Project State
+     ↓
+Normalized Context
+     ↓
+AI Analysis
+     ↓
+Authorization / Precondition
+     ↓
+GitHub Mutation
+     ↓
+Re-read Verification
+     ↓
+Durable Audit
+```
+
+---
+
+## 🛡 Safe Operations
+
+### Default role model
+
+| Capability | Admin | Member | Viewer |
+| --- | :---: | :---: | :---: |
+| Project read / analysis | ✅ | ✅ | ✅ |
+| Status / Priority update | ✅ | ✅ | ❌ |
+| Existing item add | ✅ | ✅ | ❌ |
+| Item create / assign | ✅ | ❌ | ❌ |
+| Generic field update | ✅ | ❌ | ❌ |
+| Relationship write | ✅ | ❌ | ❌ |
+| Bulk preview / approve / apply | ✅ | ❌ | ❌ |
+
+Identity별 permission snapshot은 role default를 **좁힐 수만 있고 확장할 수는 없습니다.**
+
+### Authorization path
+
+```text
+OAuth identity + scope
+        ↓
+Owner allowlist
+        ↓
+Project allowlist
+        ↓
+Identity Project membership
+        ↓
+Operation capability
+        ↓
+Global write gate
+        ↓
+Precondition / full preflight
+        ↓
+GitHub mutation
+        ↓
+Normalized re-read verification
+        ↓
+Durable audit
+```
+
+### Bulk safety
+
+Bulk operation은 즉시 여러 항목을 수정하지 않습니다.
+
+```text
+Preview
+   ↓
+Approval
+   ↓
+Apply
+```
+
+Preview plan은 digest-bound immutable artifact로 저장되고, Apply 전 current state와 authorization을 다시 검사합니다. stale preflight가 발견되면 mutation 없이 실패합니다.
+
+---
+
+## 🏗 Architecture
+
+```mermaid
+flowchart TD
+    C[ChatGPT / Claude / MCP Client] --> O[OAuth / MCP Adapter]
+    G[Custom GPT] --> REST[REST / OpenAPI Adapter]
+    O --> CORE[Shared Core]
+    REST --> CORE
+
+    CORE --> READ[Read / Project Intelligence]
+    CORE --> WRITE[Guarded Operations]
+    CORE --> GOV[Governance]
+
+    READ --> GH[GitHub GraphQL API]
+    WRITE --> GH
+    GOV --> STORE[Upstash Durable State]
+
+    GH --> P[GitHub Projects v2]
+
+    GOV --> CP[Checkpoint / Delta]
+    GOV --> AUDIT[Write Audit]
+    GOV --> BULK[Bulk Plans]
+```
+
+### Tech Stack
+
+| Layer | Technology |
+| --- | --- |
+| Language | TypeScript |
+| GitHub API | GraphQL |
+| MCP | `@modelcontextprotocol/server`, `@modelcontextprotocol/node` |
+| Validation | Zod |
+| Runtime | Node.js |
+| Package Manager | pnpm |
+| Deployment | Vercel |
+| Durable Store | Upstash Redis |
+
+상세 구조: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+
+---
+
+## ✅ Current Status
+
+**M10 Advanced Governance — Production validated / complete**
+
+- ✅ Local + Remote MCP foundation
+- ✅ OAuth / DCR / PKCE
+- ✅ Shared Core + MCP / REST adapters
+- ✅ Individual identity + Viewer / Member / Admin ACL
+- ✅ High-level Project reads and writes
+- ✅ Checkpoint / delta
+- ✅ Durable audit
+- ✅ Dependency / sub-issue read
+- ✅ Guarded relationship write
+- ✅ Bulk Preview → Approval → Apply
+- ✅ Richer capability-based ACL
+- ✅ Production validation / closeout
+
+M10 closeout 기준 full regression suite는 **236 / 236 tests passed**로 기록되어 있습니다.
+
+현재 알려진 제한과 deferred validation은 [`docs/M10_CLOSEOUT.md`](docs/M10_CLOSEOUT.md)를 참고하세요.
+
+---
+
+## 🧪 Validation
+
+일반 개발 검증:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm build
+pnpm test
+```
+
+read-only integration smoke:
+
+```bash
+pnpm smoke:read -- gyuniverse-hq 2
+```
+
+HTTP runtime smoke:
+
+```bash
+pnpm smoke:http
+```
+
+CI는 PR / `main` push에서 typecheck, build, test를 수행하며 secret이나 Production mutation을 요구하지 않습니다.
+
+---
+
+## 📚 Docs
+
+| Document | Purpose |
+| --- | --- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 전체 architecture / layer 설명 |
+| [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md) | Shared Core 중심 구조 정리 |
+| [`docs/DEPLOYMENT_RUNTIME.md`](docs/DEPLOYMENT_RUNTIME.md) | Vercel / runtime 구성 |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | 보안 원칙 |
+| [`docs/SECURITY_PERMISSIONS.md`](docs/SECURITY_PERMISSIONS.md) | permission / role 기준 |
+| [`docs/M9_REST_GPT_ACTIONS.md`](docs/M9_REST_GPT_ACTIONS.md) | REST / GPT Actions adapter |
+| [`docs/M10_ADVANCED_GOVERNANCE.md`](docs/M10_ADVANCED_GOVERNANCE.md) | M10 governance 전체 설계 |
+| [`docs/M10_RELATIONSHIP_WRITES.md`](docs/M10_RELATIONSHIP_WRITES.md) | relationship write 안전 모델 |
+| [`docs/M10_BULK_PLANS.md`](docs/M10_BULK_PLANS.md) | Bulk Preview / Approval / Apply |
+| [`docs/M10_RICHER_ACL.md`](docs/M10_RICHER_ACL.md) | capability-based ACL |
+| ⭐ [`docs/M10_CLOSEOUT.md`](docs/M10_CLOSEOUT.md) | Production validation / M10 closeout |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | milestone / roadmap |
+
+---
+
+## 🔐 Security
+
+절대로 commit하지 않습니다.
+
+```text
+- GitHub PAT / token
+- OAuth signing secret
+- OAuth team / access codes
+- GPT Actions client secret
+- Upstash credentials
+- bearer / refresh tokens
+- .env files
+```
+
+주요 원칙:
+
+- GitHub credential은 server-side에만 유지
+- client-facing OAuth token과 GitHub credential을 분리
+- least privilege + explicit allowlist
+- write는 runtime authorization과 verification을 반드시 통과
+- destructive delete tool 미제공
+- Production durable state에는 credential snapshot을 저장하지 않음
+
+---
+
+## 🛠 Local Development
+
+Requirements:
 
 - Node.js 22+
-- pnpm
-- GitHub token that can access the target Projects
-
-For organization Projects, use a fine-grained token with the minimum required **Projects** organization permission:
-
-- `read` for GitHub read/analysis/checkpoint workflows
-- `write` only when mutation tools are intentionally enabled
-
-Your GitHub organization may require approval for fine-grained personal access tokens.
-
-## Local setup
+- pnpm 10.x
+- target Projects에 접근 가능한 GitHub credential
 
 ```bash
 git clone https://github.com/4hglee-ops/gyuniverse-github-projects-mcp.git
@@ -123,446 +494,61 @@ pnpm install
 cp .env.example .env
 ```
 
-Local stdio configuration:
-
-```dotenv
-GITHUB_TOKEN=github_pat_...
-GITHUB_PROJECTS_ALLOWED_OWNERS=4hglee-ops,gyuniverse-hq
-GITHUB_PROJECTS_ALLOWED_PROJECT_IDS=
-GITHUB_PROJECTS_WRITE_ENABLED=false
-```
-
-Then run:
-
 ```bash
 pnpm typecheck
 pnpm build
 pnpm test
-pnpm start
+pnpm mcp:stdio
 ```
 
-Use `pnpm mcp:stdio` during development when you want to run directly from TypeScript.
-
-## Remote MCP core
-
-M3 adds a platform-neutral Fetch `Request -> Response` router in `src/http/router.ts`,
-a long-lived Node HTTP adapter in `src/http/node-server.ts`, and a Vercel Fetch adapter
-in `src/http/vercel.ts` exposed through `api/index.ts`.
-
-Current routes:
-
-| Route | Purpose |
-| --- | --- |
-| `/mcp` | OAuth-protected Streamable HTTP MCP endpoint |
-| `/.well-known/oauth-protected-resource` | Protected resource metadata |
-| `/.well-known/oauth-authorization-server` | OAuth authorization-server metadata |
-| `/.well-known/openid-configuration` | Compatibility metadata alias |
-| `/oauth/register` | Dynamic registration for supported public PKCE clients |
-| `/oauth/authorize` | Human approval + authorization code issuance |
-| `/oauth/token` | Authorization-code / refresh-token exchange |
-| `/health` | Minimal health response |
-
-The Node adapter translates `node:http` requests into Fetch requests and streams Fetch
-responses back to the client. Local development uses the process-local memory replay
-store by default. Serverless and horizontally scaled production deployments use the
-Upstash Redis adapter for global one-time authorization-code consumption.
-
-Run the TypeScript entrypoint during development:
+Remote HTTP 개발:
 
 ```bash
 pnpm mcp:http
 ```
 
-For the compiled runtime:
+---
 
-```bash
-pnpm build
-pnpm start:http
+## 🗺 Roadmap
+
+```mermaid
+flowchart LR
+    D[Discord Bridge] --> U[Unified Team State]
+    G[GitHub Projects MCP] --> U
+    J[Jira] -. future .-> U
+    N[Notion] -. future .-> U
+
+    U --> C[Context]
+    U --> O[Operations]
+    C --> AI[AI Team Intelligence]
+    O --> AI
 ```
 
-The adapter listens on `MCP_HTTP_HOST` (`0.0.0.0` by default) and `MCP_HTTP_PORT`
-(`PORT`, then `3000`, as fallbacks). With the server running, execute the assertion-based
-runtime smoke test using `pnpm smoke:http`. Set `MCP_HTTP_BASE_URL` when the test must
-connect to an address other than `http://localhost:${MCP_HTTP_PORT}`.
+**Current**  
+`GitHub Projects → Read / Analyze / Safe Write / Verify / Audit`
 
-### Remote OAuth configuration
+**Next possibility**  
+Higher-level workflow intelligence, operator UX, cross-source reconciliation
 
-In addition to the existing GitHub configuration:
+**Long-term direction**  
+Discord의 **대화 맥락(Context)** 과 GitHub Projects의 **운영 상태(Operations)** 를 함께 사용해 “팀에서 무엇이 결정됐고, 현재 무엇이 진행 중이며, 무엇을 바꿔야 하는가?”를 Evidence와 함께 다루는 **Gyuniverse Team Intelligence**.
 
-```dotenv
-PUBLIC_BASE_URL=https://projects-mcp.example.com
-MCP_OAUTH_TEAM_CODE=...
-MCP_OAUTH_SIGNING_SECRET=...
-MCP_OAUTH_WRITE_ENABLED=false
-MCP_OAUTH_REPLAY_STORE=upstash
-UPSTASH_REDIS_REST_URL=...
-UPSTASH_REDIS_REST_TOKEN=...
-```
-
-Vercel Marketplace integrations that inject `KV_REST_API_URL` / `KV_REST_API_TOKEN`,
-or the namespaced `MCP_REPLAY_KV_REST_API_URL` / `MCP_REPLAY_KV_REST_API_TOKEN`,
-are also supported. Production refuses an implicit memory-store
-fallback and fails closed if the selected Upstash store is unavailable. Real values
-belong in the deployment secret store and must not be committed.
-
-### OAuth scopes
-
-Default remote scope:
-
-```text
-projects:read
-```
-
-Optional write scope:
-
-```text
-projects:write
-```
-
-`projects:write` is not advertised or accepted unless:
-
-```dotenv
-MCP_OAUTH_WRITE_ENABLED=true
-```
-
-Even then, an OAuth write token **does not by itself permit a GitHub mutation**.
-
-A remote mutation requires all of these boundaries simultaneously:
-
-1. `MCP_OAUTH_WRITE_ENABLED=true`
-2. the OAuth access token includes `projects:write`
-3. `GITHUB_PROJECTS_WRITE_ENABLED=true`
-4. the target Project node ID is explicitly present in `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
-5. the individual mutation's existing validation / membership / verification checks succeed
-
-This means a read-only OAuth token forces `writeEnabled=false` for that request even if the server's GitHub write gate is globally enabled.
-
-### OAuth flow
-
-The current compatibility path supports public PKCE clients:
-
-```text
-Client
-  |
-  | protected-resource discovery
-  v
-Authorization server metadata
-  |
-  | dynamic registration
-  v
-/oauth/register
-  |
-  | authorization + PKCE S256 + resource + scope
-  v
-/oauth/authorize
-  |
-  | human team-code approval
-  v
-short-lived signed authorization code
-  |
-  | code_verifier
-  v
-/oauth/token
-  |
-  v
-short-lived MCP OAuth access token
-  |
-  v
-/mcp
-```
-
-Supported redirect URI families are deliberately allowlisted for ChatGPT, Claude, and localhost development. Arbitrary redirect origins are rejected.
-
-Authorization codes expire after two minutes. Access tokens expire after one hour. Refresh tokens expire after 30 days.
-
-### Replay protection
-
-Authorization-code replay prevention is selected by `MCP_OAUTH_REPLAY_STORE`:
-
-- `memory`: local development and single-process testing only
-- `upstash`: production shared state using atomic Redis `SET NX` with code expiry
-
-Redis keys contain SHA-256 authorization-code digests rather than bearer code values.
-Vercel and `NODE_ENV=production` runtimes require an explicit replay-store selection and
-reject the memory adapter. M10 governance state reuses the same Upstash deployment in
-Production under isolated checkpoint and audit namespaces.
-
-## Read-only integration smoke test
-
-After configuring a read-only token in `.env`:
-
-```bash
-pnpm smoke:read -- gyuniverse-hq
-pnpm smoke:read -- gyuniverse-hq 2
-```
-
-The Project-specific command reads metadata, fields, items, and a normalized snapshot. It never invokes a mutation regardless of the write setting.
-
-The read path was integration-tested against `gyuniverse-hq` Project #2 on 2026-09-05 with a fine-grained read-only token.
-
-## Checkpoint / delta workflow
-
-Create a baseline:
-
-```text
-Create a state checkpoint for Project #2 under gyuniverse-hq.
-```
-
-Later:
-
-```text
-Compare Project #2 with its latest checkpoint and show only what changed.
-```
-
-Checkpoint storage follows `M10_GOVERNANCE_STORE`: Production uses Upstash and local development may use process memory.
-
-## Guarded write workflow
-
-Local/server-side GitHub write operations require all of the following:
-
-1. the GitHub credential has the minimum required Projects write permission
-2. the target Project node ID is explicitly present in `GITHUB_PROJECTS_ALLOWED_PROJECT_IDS`
-3. `GITHUB_PROJECTS_WRITE_ENABLED=true`
-
-Remote write additionally requires the OAuth write boundary described above.
-
-Example high-level request:
-
-```text
-Set Project #2 item PVTI_... Status to Done.
-```
-
-The Status/Priority path performs Project membership validation and a post-mutation read-back verification before reporting success.
-
-### Low-level single-select smoke test
-
-The existing manual smoke script remains available for a deliberately selected non-critical item:
-
-```bash
-pnpm smoke:update-single-select -- <project-id> <item-id> <field-id> <option-id>
-```
-
-Use the minimum mutation count necessary to prove behavior, then restore `GITHUB_PROJECTS_WRITE_ENABLED=false` and reduce the token back to read-only when no further write verification is planned.
-
-## Guarded relationship writes (M10-4)
-
-Four MCP tools accept one `{ owner, number, sourceItemId, targetItemId }` pair:
-
-- `add_github_project_sub_issue` / `remove_github_project_sub_issue`: source parent, target child.
-- `add_github_project_blocked_by` / `remove_github_project_blocked_by`: source blocked by target.
-
-Require an authenticated admin with `item.relationship.write`, existing Project permissions/allowlists and write gates. Both Issues must belong to the same authorized Project. Existing parents are never implicitly replaced; incomplete evidence or unproven cycle safety denies the operation. Both changed and no-change results require fresh M10-3 reciprocal verification and durable audit. Viewer relationship reads remain unchanged. The REST/GPT Actions adapter now exposes these same Shared Core operations through `/api/v1/project/item-relationships` and `/api/v1/write/relationship/*`.
-
-See [operations, audit compatibility and safe validation/cleanup](docs/M10_RELATIONSHIP_WRITES.md). Implementation is ready for review; Production write validation is pending. Pre-M10-4 audit readers need the new optional-metadata reader backported before rolling back after relationship records have been written.
-
-## Write audit log
-
-`list_github_project_write_audit_log` exposes the newest write records from the configured M10 governance store.
-
-Current properties:
-
-- bounded to the most recent 200 entries
-- newest-first reads, maximum 200 entries
-- optional Project/item filtering
-- records operation, target, outcome and verification state
-- high-level Status/Priority writes record requested/before/after option names
-- lower-level writes are recorded without arbitrary raw field payloads
-- tokens, Authorization headers and raw secret values are never stored
-- error records use compact error codes instead of full error response bodies
-- Production uses Upstash with atomic append-and-trim under an audit-specific namespace
-- local development can use process-local memory fallback
-- malformed durable data and persistence failures fail closed
-
-This is durable operational evidence in Production, not a substitute for an external compliance/SIEM archive.
-
-## Richer ACL and bulk approval (M10-6)
-
-Viewer, Member and Admin remain stable default permission bundles. Runtime
-authorization now uses explicit operation capabilities, including
-`bulk.preview`, `bulk.approve` and `bulk.apply`, intersected with both server
-allowlists and the identity's Project memberships. OAuth identity records may
-optionally narrow their role defaults with a `permissions` array; they cannot
-expand them.
-
-Bulk self-approval remains compatible by default. Set
-`M10_BULK_APPROVAL_MODE=distinct_admin_required` only when a separate authorized
-Admin should approve. Preview, Approval and Apply recheck current capabilities;
-creator, approver and applier may be different identities. See
-[`docs/M10_RICHER_ACL.md`](docs/M10_RICHER_ACL.md).
-
-The GPT Actions OpenAPI document also exposes bulk Preview, Approval, Apply and
-Get routes. Updating a Custom GPT requires re-importing `/openapi.json` after the
-deployment containing those operation IDs; the existing OAuth scopes and client
-configuration remain unchanged.
-
-### GPT Actions item references
-
-Relationship Actions and bulk Preview no longer require users to know internal
-`PVTI_...` Project item IDs. Existing exact item IDs remain valid, while Actions
-may resolve an item from a canonical Issue/pull-request URL, an exact
-`owner/repository` plus Issue/pull-request number, or a number alone when that
-number is unique within the authorized Project. For example:
-
-```text
-gyuniverse-hq Project #2에서
-Issue #9를 Issue #8의 sub-issue로 추가해줘.
-```
-
-Resolution inventories only the Project that has already passed the owner
-allowlist, Project allowlist and authenticated membership checks. It never
-searches an arbitrary repository and assumes Project membership. In a
-multi-repository Project, duplicate numbers fail with
-`PROJECT_ITEM_REFERENCE_AMBIGUOUS`; supply the Issue/pull-request URL or exact
-repository plus number instead. Unknown references fail with
-`PROJECT_ITEM_NOT_FOUND`, and incomplete Project coverage fails closed.
-
-The Project owner is not the authenticated actor's `githubLogin`. Actions should
-send it explicitly. The server accepts an omitted owner only when exactly one
-owner is configured in the authorized allowlist; otherwise it returns
-`PROJECT_OWNER_REQUIRED`. Bulk references are resolved before the immutable
-Preview is stored, so a resolution failure creates no plan and performs no
-GitHub mutation. Approval, Apply and Get continue to use only `planId` plus
-`planDigest`.
-
-## Safety model
-
-### Owner allowlist
-
-`GITHUB_PROJECTS_ALLOWED_OWNERS` limits users/organizations whose Projects the MCP can read. Authenticated access fails closed when it is empty.
-
-### Project allowlist
-
-`GITHUB_PROJECTS_ALLOWED_PROJECT_IDS` is mandatory for authenticated reads and all writes. Local unauthenticated compatibility reads may omit it.
-
-### GitHub write gate
-
-```dotenv
-GITHUB_PROJECTS_WRITE_ENABLED=false
-```
-
-### Remote OAuth write gate
-
-```dotenv
-MCP_OAUTH_WRITE_ENABLED=false
-```
-
-Remote writes require both gates, the OAuth write scope, the explicit Project allowlist, and the normal mutation validation path.
-
-Checkpoint tools and write-audit reads do not bypass or activate GitHub writes.
-
-## CI validation
-
-Pull requests and pushes to `main` run:
-
-```text
-pnpm install --frozen-lockfile
-pnpm typecheck
-pnpm build
-pnpm test
-```
-
-CI remains secret-free; write smoke tests and deployment do not run automatically.
-
-## Current architecture
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
-```text
-src/
-├── config.ts
-├── github/
-│   ├── graphql-client.ts
-│   ├── project-items.ts
-│   ├── projects.ts
-│   └── references.ts
-├── http/
-│   ├── remote-mcp.ts
-│   └── router.ts
-├── oauth/
-│   ├── endpoints.ts
-│   └── stateless.ts
-├── workflow/
-│   ├── checkpoint.ts
-│   ├── reconciliation.ts
-│   ├── single-select-update.ts
-│   ├── state-gaps.ts
-│   └── write-audit.ts
-└── mcp/
-    ├── build-server.ts
-    ├── checkpoint-tools.ts
-    ├── workflow-write-tools.ts
-    └── stdio.ts
-```
-
-## Roadmap
-
-### M1 — local Projects MCP ✅
-
-- [x] GraphQL client
-- [x] Project metadata / fields / items
-- [x] normalized project snapshot and team brief context
-- [x] gated add-item / field-update mutations
-- [x] regression tests, build/start scripts and CI
-- [x] real read integration test
-- [x] gated write integration test against a non-critical item
-
-### M1.1 — scale backlog
-
-- [ ] pagination beyond first 100 normalized snapshot items
-
-### M2 — workflow intelligence ✅ implementation complete
-
-- [x] Issue / PR URL → node ID resolver
-- [x] Issue / PR URL → Project item resolver with cursor pagination
-- [x] missing assignee / missing status detection
-- [x] PR merge ↔ Project status reconciliation
-- [x] project state checkpoint / delta
-- [x] safer high-level Status / Priority mutation tools
-- [x] bounded write audit log with durable M10 Production persistence
-
-### M3 — remote MCP ✅
-
-- [x] platform-neutral HTTP MCP request handler
-- [x] OAuth protected-resource metadata
-- [x] OAuth authorization-server metadata
-- [x] PKCE + dynamic client registration compatibility path
-- [x] ChatGPT / Claude redirect allowlist
-- [x] OAuth read/write scope separation
-- [x] remote write defense-in-depth
-- [x] secret-free OAuth/HTTP regression tests
-- [x] single-instance long-lived Node runtime selected
-- [x] Node HTTP deployment adapter
-- [x] Vercel Fetch deployment adapter and route rewrites
-- [x] Upstash Redis shared OAuth replay store
-- [x] fail-closed production store selection
-- [x] Vercel project and Upstash Marketplace provisioning
-- [x] production secret configuration
-- [x] live ChatGPT connection smoke test
-- [ ] live Claude connection smoke test
-
-### M4 — Project Operating Foundation ◐
-
-- [x] inspect Project #2, Status, Priority, optional Iteration, field IDs, and API access
-- [x] preserve existing Priority P0/P1/P2/P3
-- [x] add dry-run-first no-sprint view setup with write gates and re-read verification
-- [x] keep Iteration disabled by default for the continuous-flow operating model
-- [ ] create/verify Backlog, Active Work, My Work, Review Queue, and Workstream views
-- [ ] configure built-in close/merge/auto-add workflows
-- [ ] install ready-for-review Actions in the three source repositories
-
-See [`docs/M4_PROJECT_OPERATING_FOUNDATION.md`](docs/M4_PROJECT_OPERATING_FOUNDATION.md)
-and [`docs/M4_PROJECT_UI_SETUP.md`](docs/M4_PROJECT_UI_SETUP.md).
-
-## Security
-
-Never commit GitHub tokens, OAuth signing secrets, team codes, or `.env` files.
-
-The client-facing MCP OAuth token and the server-side GitHub credential are separate credentials with separate purposes. OAuth access must never expose or substitute for the GitHub token.
-
-Checkpoint data, write audit records, and OAuth authorization-code replay state use
-process-local memory only in development. Production reuses the configured shared Upstash
-deployment with isolated namespaces for each concern.
+---
 
 ## License
 
 No license is currently granted. This repository is private during the initial development phase.
+
+---
+
+<div align="center">
+
+<img src="./assets/gyuniverse-github-projects-mcp-logo.png" alt="Gyuniverse GitHub Projects MCP Logo" width="150" />
+
+### 🌌 Gyuniverse
+
+**Project state → Safe operations → Better team execution**
+
+<sub>Built for AI-native GitHub Projects workflows.</sub>
+
+</div>
