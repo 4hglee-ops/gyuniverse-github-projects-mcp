@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/gyuniverse-github-projects-mcp-banner.jpg" alt="Gyuniverse GitHub Projects MCP" width="100%" />
+<img src="./assets/gyuniverse-github-projects-mcp-banner.png" alt="Gyuniverse GitHub Projects MCP" width="100%" />
 
 <br/>
 
@@ -543,7 +543,7 @@ No license is currently granted. This repository is private during the initial d
 
 <div align="center">
 
-<img src="./assets/gyuniverse-github-projects-mcp-logo.png" alt="Gyuniverse GitHub Projects MCP Logo" width="150" />
+<img src="./assets/gyuniverse-github-projects-mcp-logo-hq.png" alt="Gyuniverse GitHub Projects MCP Logo" width="150" />
 
 ### 🌌 Gyuniverse
 
