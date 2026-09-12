@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a reproducible problem in the MCP server, adapters, or docs
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include GitHub tokens, OAuth codes, access codes, cookies, Authorization headers, Upstash credentials, or real `.env` values.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest safe sequence that reproduces the issue.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Runtime, Node.js version, client type, deployment target, and relevant non-secret configuration.
+      placeholder: |
+        Node.js: 22.x
+        Client: ChatGPT / Claude / local stdio
+        Runtime: local Node / Vercel
+    validations:
+      required: false
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized logs or evidence
+      description: Remove all credentials and personally sensitive values before posting.
+    validations:
+      required: false

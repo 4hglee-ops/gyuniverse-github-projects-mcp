@@ -15,15 +15,16 @@
 <p>
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/GraphQL-GitHub-7A1FA2?style=flat-square&logo=graphql&logoColor=white" alt="GraphQL" />
-  <img src="https://img.shields.io/badge/Deploy-Vercel-000000?style=flat-square&logo=vercel&logoColor=white" alt="Vercel" />
+  <img src="https://img.shields.io/badge/Deploy-Vercel-000000?style=flat-square&logo=vercel" alt="Vercel" />
   <img src="https://img.shields.io/badge/Store-Upstash-00C98D?style=flat-square" alt="Upstash" />
-  <img src="https://img.shields.io/badge/Safety-Guarded%20Writes-2EA44F?style=flat-square" alt="Guarded Writes" />
+  <img src="https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square" alt="Apache-2.0" />
 </p>
 
-**GitHub Projects → Safe AI Operations → Better Team Execution**  
+**GitHub Projects → Safe AI Operations → Better Team Execution**
+
 ChatGPT, Claude 같은 AI 클라이언트가 GitHub Projects v2를 **조회·분석·변경·검증·감사**할 수 있도록 연결하는 production-oriented MCP server입니다.
 
-[⚡ Quick Start](#-quick-start) · [✨ Features](#-features) · [💡 Use Cases](#-use-cases) · [🛡 Safe Operations](#-safe-operations) · [🏗 Architecture](#-architecture) · [📚 Docs](#-docs)
+[⚡ Quick Start](#-quick-start) · [✨ Features](#-features) · [🛡 Safety](#-safe-operations) · [🏗 Architecture](#-architecture) · [📚 Docs](#-docs) · [🤝 Contributing](#-contributing)
 
 </div>
 
@@ -44,7 +45,7 @@ Project item, Status, Priority, assignee, relationship, 변경 사항을 읽고 
 
 ### 🛡 Operate Safely
 
-권한과 allowlist, write gate, precondition, re-read verification을 거쳐 안전하게 Project를 변경합니다.
+권한, allowlist, write gate, precondition, re-read verification을 거쳐 안전하게 Project를 변경합니다.
 
 </td>
 <td width="33%" valign="top">
@@ -83,6 +84,19 @@ ChatGPT / Claude / other MCP clients
 
 ---
 
+## 🎯 Who is this for?
+
+이 프로젝트는 다음과 같은 경우를 위해 설계했습니다.
+
+- ChatGPT / Claude 같은 AI에서 GitHub Projects 상태를 자연어로 조회하고 싶은 경우
+- AI에게 Status / Priority 변경을 맡기되 명시적인 권한과 검증 경계가 필요한 경우
+- PR merge 상태와 Project 상태의 불일치를 탐지하고 싶은 경우
+- parent / sub-issue / dependency 관계를 AI workflow에서 다루고 싶은 경우
+- 여러 변경을 즉시 실행하지 않고 Preview → Approval → Apply 방식으로 통제하고 싶은 경우
+- 변경 전후 상태와 AI가 실행한 mutation을 audit 가능한 형태로 남기고 싶은 경우
+
+---
+
 ## ✨ Features
 
 | Status | 기능 | 설명 |
@@ -91,8 +105,8 @@ ChatGPT / Claude / other MCP clients
 | ✅ | Workflow intelligence | missing Status / assignee, PR merge ↔ Project 상태 불일치 탐지 |
 | ✅ | Project brief | normalized snapshot 기반 팀 상태 브리핑 |
 | ✅ | Checkpoint / delta | 기준선을 저장하고 이후 변경 사항 비교 |
-| ✅ | Guarded Status / Priority | semantic high-level write + post-write verification |
-| ✅ | Work item operations | backlog capture, item 생성, assignment 등 high-level workflow 지원 |
+| ✅ | Guarded Status / Priority | high-level write + post-write verification |
+| ✅ | Work item operations | backlog capture, item 생성, assignment 등 workflow 지원 |
 | ✅ | Relationship read | parent / sub-issue / blocks / blocked-by 조회 |
 | ✅ | Guarded relationship write | admin-only 관계 추가 / 제거 + reciprocal verification |
 | ✅ | Bulk governance | immutable Preview → Approval → Apply workflow |
@@ -111,7 +125,7 @@ Tool discovery
 Authorization
 ```
 
-실제 mutation은 OAuth scope, identity, Project membership, role/capability, owner/Project allowlist, server write gate와 각 operation의 검증을 모두 통과해야 합니다.
+실제 mutation은 OAuth scope, identity, Project membership, role/capability, owner/Project allowlist, server write gate와 각 operation의 검증을 통과해야 합니다.
 
 파괴적인 delete 계열 도구는 의도적으로 제공하지 않습니다.
 
@@ -119,7 +133,7 @@ Authorization
 
 ## ⚡ Quick Start
 
-### Production Endpoint
+### Maintainer-hosted endpoint
 
 ```text
 https://gyuniverse-github-projects-mcp.vercel.app/mcp
@@ -131,6 +145,11 @@ GPT Actions OpenAPI:
 https://gyuniverse-github-projects-mcp.vercel.app/openapi.json
 ```
 
+> **Publicly reachable ≠ publicly authorized**  
+> 위 endpoint가 인터넷에서 접근 가능하다는 것은 임의의 GitHub Project에 접근할 수 있다는 뜻이 아닙니다. 실제 접근은 maintainer가 설정한 OAuth identity, owner/Project allowlist, Project membership, capability와 write gate에 의해 제한됩니다.
+
+자신의 GitHub Projects에 연결하려는 외부 사용자는 일반적으로 **self-hosting**을 권장합니다.
+
 | Client | Connection | Authentication | Server support |
 | --- | --- | --- | :---: |
 | ChatGPT connector | Remote MCP | OAuth + PKCE | ✅ |
@@ -138,54 +157,7 @@ https://gyuniverse-github-projects-mcp.vercel.app/openapi.json
 | Claude Code | Remote HTTP MCP | OAuth | ✅ |
 | Claude Chat / compatible connector | Remote MCP | OAuth + DCR + PKCE | ✅ |
 
-> 실제 read/write 사용 가능 범위는 연결한 클라이언트의 기능과 발급된 OAuth scope, 서버의 ACL / write gate 설정에 따라 달라집니다.
-
-<details>
-<summary><b>🟢 Remote MCP 연결</b></summary>
-
-<br/>
-
-MCP Server URL:
-
-```text
-https://gyuniverse-github-projects-mcp.vercel.app/mcp
-```
-
-서버는 OAuth protected-resource / authorization-server discovery, public DCR, PKCE S256 흐름을 제공합니다.
-
-기본 scope:
-
-```text
-projects:read
-```
-
-write가 서버에서 활성화된 경우 사용할 수 있는 추가 scope:
-
-```text
-projects:write
-```
-
-</details>
-
-<details>
-<summary><b>🟢 Custom GPT / GPT Actions 연결</b></summary>
-
-<br/>
-
-OpenAPI schema:
-
-```text
-https://gyuniverse-github-projects-mcp.vercel.app/openapi.json
-```
-
-GPT Actions용 REST adapter도 MCP와 동일한 Shared Core, authorization, verification, audit 경계를 사용합니다.
-
-</details>
-
-<details>
-<summary><b>🛠 Local stdio 개발</b></summary>
-
-<br/>
+### Local stdio
 
 ```bash
 git clone https://github.com/4hglee-ops/gyuniverse-github-projects-mcp.git
@@ -199,11 +171,25 @@ pnpm mcp:stdio
 
 ```dotenv
 GITHUB_TOKEN=github_pat_...
-GITHUB_PROJECTS_ALLOWED_OWNERS=4hglee-ops,gyuniverse-hq
+GITHUB_PROJECTS_ALLOWED_OWNERS=your-user-or-org
 GITHUB_PROJECTS_WRITE_ENABLED=false
+MCP_OAUTH_WRITE_ENABLED=false
 ```
 
-</details>
+### Self-hosting boundary
+
+Self-hosted 사용자는 자신의 환경에서 다음을 직접 관리해야 합니다.
+
+- GitHub credential
+- allowed owner / Project IDs
+- OAuth identities and capabilities
+- read/write scopes
+- server write gates
+- OAuth signing secret
+- Upstash durable state
+- public base URL
+
+전체 환경변수 목록은 [`.env.example`](.env.example), 배포 기준은 [`docs/DEPLOYMENT_RUNTIME.md`](docs/DEPLOYMENT_RUNTIME.md)를 참고하세요.
 
 ---
 
@@ -330,8 +316,6 @@ Durable audit
 
 ### Bulk safety
 
-Bulk operation은 즉시 여러 항목을 수정하지 않습니다.
-
 ```text
 Preview
    ↓
@@ -341,6 +325,8 @@ Apply
 ```
 
 Preview plan은 digest-bound immutable artifact로 저장되고, Apply 전 current state와 authorization을 다시 검사합니다. stale preflight가 발견되면 mutation 없이 실패합니다.
+
+상세 보안 모델은 [`docs/SECURITY.md`](docs/SECURITY.md)와 [`docs/SECURITY_PERMISSIONS.md`](docs/SECURITY_PERMISSIONS.md)를 참고하세요.
 
 ---
 
@@ -381,13 +367,11 @@ flowchart TD
 | Deployment | Vercel |
 | Durable Store | Upstash Redis |
 
-상세 구조: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-
 ---
 
 ## ✅ Current Status
 
-**M10 Advanced Governance — Production validated / complete**
+**v0.2.0 / M10 Advanced Governance — Production validated**
 
 - ✅ Local + Remote MCP foundation
 - ✅ OAuth / DCR / PKCE
@@ -399,7 +383,7 @@ flowchart TD
 - ✅ Dependency / sub-issue read
 - ✅ Guarded relationship write
 - ✅ Bulk Preview → Approval → Apply
-- ✅ Richer capability-based ACL
+- ✅ Capability-based ACL
 - ✅ Production validation / closeout
 
 M10 closeout 기준 full regression suite는 **236 / 236 tests passed**로 기록되어 있습니다.
@@ -410,8 +394,6 @@ M10 closeout 기준 full regression suite는 **236 / 236 tests passed**로 기�
 
 ## 🧪 Validation
 
-일반 개발 검증:
-
 ```bash
 pnpm install --frozen-lockfile
 pnpm typecheck
@@ -419,7 +401,7 @@ pnpm build
 pnpm test
 ```
 
-read-only integration smoke:
+Read-only integration smoke:
 
 ```bash
 pnpm smoke:read -- gyuniverse-hq 2
@@ -431,7 +413,7 @@ HTTP runtime smoke:
 pnpm smoke:http
 ```
 
-CI는 PR / `main` push에서 typecheck, build, test를 수행하며 secret이나 Production mutation을 요구하지 않습니다.
+CI는 PR / `main` push에서 typecheck, build, test를 수행하며 Production secret이나 mutation을 요구하지 않습니다.
 
 ---
 
@@ -441,16 +423,19 @@ CI는 PR / `main` push에서 typecheck, build, test를 수행하며 secret이나
 | --- | --- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 전체 architecture / layer 설명 |
 | [`docs/ARCHITECTURE_V2.md`](docs/ARCHITECTURE_V2.md) | Shared Core 중심 구조 정리 |
-| [`docs/DEPLOYMENT_RUNTIME.md`](docs/DEPLOYMENT_RUNTIME.md) | Vercel / runtime 구성 |
-| [`docs/SECURITY.md`](docs/SECURITY.md) | 보안 원칙 |
+| [`docs/DEPLOYMENT_RUNTIME.md`](docs/DEPLOYMENT_RUNTIME.md) | Vercel / runtime / self-hosting 구성 |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | 현재 보안 원칙과 authorization boundary |
 | [`docs/SECURITY_PERMISSIONS.md`](docs/SECURITY_PERMISSIONS.md) | permission / role 기준 |
 | [`docs/M9_REST_GPT_ACTIONS.md`](docs/M9_REST_GPT_ACTIONS.md) | REST / GPT Actions adapter |
 | [`docs/M10_ADVANCED_GOVERNANCE.md`](docs/M10_ADVANCED_GOVERNANCE.md) | M10 governance 전체 설계 |
 | [`docs/M10_RELATIONSHIP_WRITES.md`](docs/M10_RELATIONSHIP_WRITES.md) | relationship write 안전 모델 |
 | [`docs/M10_BULK_PLANS.md`](docs/M10_BULK_PLANS.md) | Bulk Preview / Approval / Apply |
 | [`docs/M10_RICHER_ACL.md`](docs/M10_RICHER_ACL.md) | capability-based ACL |
-| ⭐ [`docs/M10_CLOSEOUT.md`](docs/M10_CLOSEOUT.md) | Production validation / M10 closeout |
+| [`docs/M10_CLOSEOUT.md`](docs/M10_CLOSEOUT.md) | Production validation / M10 closeout |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | milestone / roadmap |
+| [`CHANGELOG.md`](CHANGELOG.md) | 공개 버전 변경 이력 |
+
+M4/M7/M9/M10 문서는 현재 기능만 설명하는 사용자 가이드가 아니라 프로젝트의 설계·검증 과정도 함께 남긴 development history 성격을 가집니다.
 
 ---
 
@@ -465,17 +450,11 @@ CI는 PR / `main` push에서 typecheck, build, test를 수행하며 secret이나
 - GPT Actions client secret
 - Upstash credentials
 - bearer / refresh tokens
+- cookies / Authorization headers
 - .env files
 ```
 
-주요 원칙:
-
-- GitHub credential은 server-side에만 유지
-- client-facing OAuth token과 GitHub credential을 분리
-- least privilege + explicit allowlist
-- write는 runtime authorization과 verification을 반드시 통과
-- destructive delete tool 미제공
-- Production durable state에는 credential snapshot을 저장하지 않음
+보안 취약점을 발견한 경우 실제 credential이나 private Project data를 public issue에 올리지 마세요. GitHub private vulnerability reporting이 활성화되어 있다면 해당 경로를 우선 사용하고, 그렇지 않다면 maintainer에게 비공개로 알려주세요.
 
 ---
 
@@ -492,9 +471,6 @@ git clone https://github.com/4hglee-ops/gyuniverse-github-projects-mcp.git
 cd gyuniverse-github-projects-mcp
 pnpm install
 cp .env.example .env
-```
-
-```bash
 pnpm typecheck
 pnpm build
 pnpm test
@@ -506,6 +482,16 @@ Remote HTTP 개발:
 ```bash
 pnpm mcp:http
 ```
+
+---
+
+## 🤝 Contributing
+
+Bug reports, documentation improvements, feature proposals, and pull requests are welcome.
+
+개발 환경, validation 기준, 보안 관련 PR 원칙은 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고하세요.
+
+Public issue/PR에 실제 token, access code, secret, private Project data를 포함하지 마세요.
 
 ---
 
@@ -537,7 +523,7 @@ Discord의 **대화 맥락(Context)** 과 GitHub Projects의 **운영 상태(Ope
 
 ## License
 
-No license is currently granted. This repository is private during the initial development phase.
+Licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE).
 
 ---
 

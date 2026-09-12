@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest a new capability or improvement
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What workflow or limitation are you trying to improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed direction
+      description: Describe the desired behavior. Alternatives are welcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Read / analysis
+        - Write operations
+        - OAuth / identity / ACL
+        - Relationship operations
+        - Bulk governance
+        - Audit / checkpoint
+        - GPT Actions / REST
+        - Deployment / runtime
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security or compatibility considerations
+      description: Note any effects on authorization, credentials, write boundaries, or backward compatibility.
+    validations:
+      required: false
