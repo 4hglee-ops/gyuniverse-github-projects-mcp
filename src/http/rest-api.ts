@@ -14,6 +14,8 @@ import { SnapshotService } from "../core/snapshots/snapshot-service.js";
 import { WorkItemService } from "../core/work-items/work-item-service.js";
 import { HighLevelWriteService } from "../core/writes/high-level-write-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
+import { GitHubProjectsProvider } from "../providers/github/github-projects-provider.js";
+import { ProjectProviderRegistry } from "../providers/registry.js";
 import {
   bearerToken,
   oauthAccessTokenPayload,
@@ -204,7 +206,9 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
 
   const client = options.client ?? new GitHubGraphQlClient(config.githubToken);
   const projects = new ProjectService({ config, client, principal });
-  const snapshots = new SnapshotService(projects);
+  const providers = new ProjectProviderRegistry([new GitHubProjectsProvider(projects)]);
+  const githubProjects = providers.require("github_projects");
+  const snapshots = new SnapshotService({ getProjectSnapshot: (owner, number, first) => githubProjects.getSnapshot(owner, number, first) });
   const reads = new HighLevelReadService(snapshots);
   const identity = new IdentityContextService(principal);
   const workItems = new WorkItemService({ config, client, projects });
