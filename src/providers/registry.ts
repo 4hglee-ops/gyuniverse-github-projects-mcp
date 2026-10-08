@@ -1,4 +1,5 @@
 import type { ProjectProvider, ProviderId } from "./provider.js";
+import { normalizeResourceRef, type ResourceRef } from "../core/resources/resource-ref.js";
 
 /**
  * Request-scoped registry for Project read providers.
@@ -20,6 +21,25 @@ export class ProjectProviderRegistry {
     }
     this.providers.set(provider.id, provider);
     return this;
+  }
+
+  /** Dispatch a provider-qualified reference; do not weaken provider authorization. */
+  async getResource(ref: ResourceRef): Promise<unknown> {
+    const resource = normalizeResourceRef(ref);
+    const provider = this.require(resource.provider);
+    if (resource.provider === "github_projects") {
+      return provider.getProject(resource.owner, resource.projectNumber);
+    }
+    throw new Error("PROVIDER_OPERATION_UNSUPPORTED: Jira resource reads are not implemented yet.");
+  }
+
+  async getResourceSnapshot(ref: ResourceRef, first = 100): Promise<unknown> {
+    const resource = normalizeResourceRef(ref);
+    const provider = this.require(resource.provider);
+    if (resource.provider === "github_projects") {
+      return provider.getSnapshot(resource.owner, resource.projectNumber, first);
+    }
+    throw new Error("PROVIDER_OPERATION_UNSUPPORTED: Jira snapshot reads are not implemented yet.");
   }
 
   require(providerId: ProviderId): ProjectProvider {
