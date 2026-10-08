@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ProjectProvider } from "./provider.js";
+import { githubProjectRef, jiraProjectRef } from "../core/resources/resource-ref.js";
 import { ProjectProviderRegistry } from "./registry.js";
 
 function githubProvider(): ProjectProvider {
@@ -37,4 +38,22 @@ test("separate request registries do not share provider instances", () => {
   const second = new ProjectProviderRegistry();
   assert.throws(() => second.require("github_projects"), /PROVIDER_NOT_REGISTERED/);
   assert.ok(first.require("github_projects"));
+});
+
+test("resource dispatcher translates GitHub reference to existing provider signature", async () => {
+  const registry = new ProjectProviderRegistry([githubProvider()]);
+  assert.deepEqual(await registry.getResource(githubProjectRef("gyuniverse-hq", 2)), { id: "PVT_allowed" });
+  assert.deepEqual(await registry.getResourceSnapshot(githubProjectRef("gyuniverse-hq", 2)), { items: [] });
+});
+
+test("resource dispatcher rejects unsupported Jira without cross-provider fallback", async () => {
+  const registry = new ProjectProviderRegistry([githubProvider()]);
+  await assert.rejects(
+    () => registry.getResource(jiraProjectRef("cloud-123", "10042", "SKN")),
+    /PROVIDER_NOT_REGISTERED/,
+  );
+  await assert.rejects(
+    () => registry.getResourceSnapshot(jiraProjectRef("cloud-123", "10042")),
+    /PROVIDER_NOT_REGISTERED/,
+  );
 });
