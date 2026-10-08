@@ -5,7 +5,7 @@ import {
 } from "../../config.js";
 import { IdentityPolicy } from "../identity/identity-policy.js";
 import type { AuthenticatedPrincipal } from "../identity/principal.js";
-import { principalHasProject } from "../identity/principal.js";
+import { principalHasProjectPermission } from "../identity/principal.js";
 import { GitHubGraphQlClient } from "../../github/graphql-client.js";
 import {
   getProject,
@@ -57,8 +57,7 @@ export class ProjectService {
   private assertPrincipalRead(projectId: string): void {
     const principal = this.options.principal ?? null;
     if (!principal) return;
-    this.identity.assertPermission(principal, "project.read");
-    this.identity.assertProjectMembership(principal, projectId);
+    this.identity.assertProjectPermission(principal, projectId, "project.read");
   }
 
   async listProjects(owner: string, first = 20): Promise<unknown[]> {
@@ -80,8 +79,7 @@ export class ProjectService {
 
       const principal = this.options.principal ?? null;
       if (!principal) return true;
-      if (!principal.permissions.includes("project.read")) return false;
-      return principalHasProject(principal, projectId);
+      return principalHasProjectPermission(principal, projectId, "project.read");
     });
   }
 
