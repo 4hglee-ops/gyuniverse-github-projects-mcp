@@ -83,9 +83,8 @@ export class WritePolicy {
     }
 
     if (this.principal) {
-      this.identity.assertProjectMembership(this.principal, request.projectId);
-      this.identity.assertPermission(this.principal, permission);
-      this.identity.assertPermission(this.principal, "project.write");
+      this.identity.assertProjectPermission(this.principal, request.projectId, permission);
+      this.identity.assertProjectPermission(this.principal, request.projectId, "project.write");
     }
 
     return {
