@@ -14,6 +14,8 @@ import { SnapshotService } from "../core/snapshots/snapshot-service.js";
 import { WorkItemService } from "../core/work-items/work-item-service.js";
 import { WorkflowService } from "../core/workflow/workflow-service.js";
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
+import { GitHubProjectsProvider } from "../providers/github/github-projects-provider.js";
+import { ProjectProviderRegistry } from "../providers/registry.js";
 import { registerCheckpointTools } from "./checkpoint-tools.js";
 import { registerHighLevelReadTools } from "./high-level-read-tools.js";
 import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
@@ -35,7 +37,9 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   const server = new McpServer({ name: "gyuniverse-github-projects-mcp", version: "0.2.0" });
 
   const projectService = new ProjectService({ config, client, principal });
-  const snapshotService = new SnapshotService(projectService);
+  const providers = new ProjectProviderRegistry([new GitHubProjectsProvider(projectService)]);
+  const githubProjects = providers.require("github_projects");
+  const snapshotService = new SnapshotService({ getProjectSnapshot: (owner, number, first) => githubProjects.getSnapshot(owner, number, first) });
   const workflowService = new WorkflowService(snapshotService);
   const highLevelReadService = new HighLevelReadService(snapshotService);
   const changeService = new ProjectChangeService(snapshotService);
@@ -72,7 +76,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
       inputSchema: z.object({ owner: z.string().min(1), first: z.number().int().min(1).max(100).default(20) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, first }) => json(await projectService.listProjects(owner, first)),
+    async ({ owner, first }) => json(await githubProjects.listProjects(owner, first)),
   );
 
   server.registerTool(
@@ -82,7 +86,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number }) => json(await projectService.resolveProject(owner, number)),
+    async ({ owner, number }) => json(await githubProjects.getProject(owner, number)),
   );
 
   server.registerTool(
@@ -92,7 +96,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number }) => json(await projectService.listProjectFields(owner, number)),
+    async ({ owner, number }) => json(await githubProjects.listFields(owner, number)),
   );
 
   server.registerTool(
@@ -102,7 +106,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
       inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(100).default(50) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    async ({ owner, number, first }) => json(await projectService.listProjectItems(owner, number, first)),
+    async ({ owner, number, first }) => json(await githubProjects.listItems(owner, number, first)),
   );
 
   server.registerTool(
