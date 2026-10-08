@@ -3,6 +3,7 @@ import {
   type ProjectPermission,
   principalHasPermission,
   principalHasProject,
+  principalHasProjectPermission,
 } from "./principal.js";
 
 export class IdentityPolicy {
@@ -21,6 +22,14 @@ export class IdentityPolicy {
       throw new Error(
         `PERMISSION_DENIED: Principal '${this.bounded(principal.id)}' lacks permission '${permission}'.`,
       );
+    }
+  }
+
+  assertProjectPermission(principal: AuthenticatedPrincipal | null | undefined, projectId: string, permission: ProjectPermission): void {
+    this.assertProjectMembership(principal, projectId);
+    this.assertPermission(principal, permission);
+    if (!principalHasProjectPermission(principal, projectId, permission)) {
+      throw new Error("PERMISSION_DENIED: Principal lacks project-scoped capability.");
     }
   }
 

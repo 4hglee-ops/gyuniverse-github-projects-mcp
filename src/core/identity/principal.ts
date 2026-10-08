@@ -36,6 +36,8 @@ export interface AuthenticatedPrincipal {
   role: ProjectRole;
   permissions: ProjectPermission[];
   projectIds: string[];
+  /** Optional per-project capability ceilings from a verified team ACL snapshot. */
+  resourcePermissions?: Record<string, ProjectPermission[]>;
   source: "oauth" | "local" | "system";
 }
 
@@ -103,4 +105,16 @@ export function principalHasProject(
   projectId: string,
 ): boolean {
   return Boolean(principal?.projectIds.includes(projectId));
+}
+
+/** Requires BOTH the legacy principal capability and its project-specific ceiling. */
+export function principalHasProjectPermission(
+  principal: AuthenticatedPrincipal | null | undefined,
+  projectId: string,
+  permission: ProjectPermission,
+): boolean {
+  if (!principalHasProject(principal, projectId) || !principalHasPermission(principal, permission)) return false;
+  if (!principal?.resourcePermissions) return true; // legacy compatibility mode
+  return Boolean(Object.hasOwn(principal.resourcePermissions, projectId) &&
+    principal.resourcePermissions[projectId]?.includes(permission));
 }
