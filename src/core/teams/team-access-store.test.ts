@@ -29,3 +29,21 @@ test("ACL DB rejects failures, malformed rows and bad server configuration", asy
   assert.throws(()=>new SupabaseTeamAccessStore("http://remote.example","secret"),/TEAM_ACL_CONFIG_INVALID/);
   assert.throws(()=>new SupabaseTeamAccessStore(url,""),/TEAM_ACL_CONFIG_INVALID/);
 });
+
+test("new Supabase sb_secret key is only placed in apikey, never bearer Authorization", async () => {
+  let sentHeaders: Record<string,string> | undefined;
+  const store = new SupabaseTeamAccessStore(url, "sb_secret_testkey", async (_url, init) => {
+    sentHeaders = init.headers as Record<string,string>;
+    return {ok:true,status:200,json:async()=>[]};
+  });
+  await store.getSnapshot("user:test");
+  assert.equal(sentHeaders?.apikey,"sb_secret_testkey");
+  assert.equal(Object.hasOwn(sentHeaders ?? {}, "Authorization"),false);
+});
+
+test("publishable keys are refused for privileged team ACL reads", () => {
+  assert.throws(
+    () => new SupabaseTeamAccessStore(url,"sb_publishable_notprivileged"),
+    /TEAM_ACL_CONFIG_INVALID/,
+  );
+});
