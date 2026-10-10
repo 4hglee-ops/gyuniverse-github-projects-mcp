@@ -2,6 +2,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 
 import { type AppConfig, loadConfig } from "../config.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
+import { createTeamAccessStore, resolveTeamScopedPrincipal } from "../core/teams/team-access-runtime.js";
 import {
   type AuthenticatedPrincipal,
   principalForRole,
@@ -77,8 +78,14 @@ export async function handleRemoteMcpRequest(
   const baseConfig = options?.config ?? loadConfig();
   const effectiveConfig = configForRemoteScope(baseConfig, access.scope);
   const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
-  const principal = resolveRemotePrincipal(access.sub, effectiveConfig);
-  if (!principal) return unauthorized();
+  const legacyPrincipal = resolveRemotePrincipal(access.sub, effectiveConfig);
+  if (!legacyPrincipal) return unauthorized();
+  let principal;
+  try {
+    principal = await resolveTeamScopedPrincipal(legacyPrincipal, createTeamAccessStore());
+  } catch {
+    return new Response("Authorization unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
 
   const handler = createMcpHandler(() => buildMcpServer({
     config: effectiveConfig,
