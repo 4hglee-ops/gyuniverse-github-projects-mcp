@@ -24,20 +24,27 @@ export class SupabaseTeamAccessStore implements TeamAccessStore {
       parsed.username || parsed.password || parsed.search || parsed.hash) {
       throw new Error("TEAM_ACL_CONFIG_INVALID: A secure Supabase URL is required.");
     }
-    if (!serviceKey) throw new Error("TEAM_ACL_CONFIG_INVALID: Supabase service credential is required.");
+    if (!serviceKey || serviceKey.startsWith("sb_publishable_") || serviceKey.trim() !== serviceKey) {
+      throw new Error("TEAM_ACL_CONFIG_INVALID: A server-only Supabase secret credential is required.");
+    }
   }
 
   async getSnapshot(subject: string): Promise<TeamAccessSnapshot> {
     if (!subject || subject.length > 256) throw new Error("TEAM_ACL_SUBJECT_INVALID: Invalid subject.");
     // The subject comes exclusively from a verified MCP OAuth access token.
+    // New sb_secret_* keys are opaque API keys, not JWTs. Do not place them
+    // in Authorization: Bearer. Legacy service_role JWTs still support it.
+    const headers: Record<string, string> = {
+      apikey: this.serviceKey,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    };
+    if (!this.serviceKey.startsWith("sb_secret_")) {
+      headers.Authorization = "Bearer " + this.serviceKey;
+    }
     const response = await this.fetcher(this.url.replace(/\/$/, "") + "/rest/v1/rpc/get_team_access_snapshot", {
       method: "POST",
-      headers: {
-        apikey: this.serviceKey,
-        Authorization: "Bearer " + this.serviceKey,
-        "Content-Type": "application/json",
-        "Cache-Control": "no-store",
-      },
+      headers,
       body: JSON.stringify({ p_subject: subject }),
       signal: AbortSignal.timeout(5000),
     });
