@@ -6,6 +6,7 @@ import type { BulkPlanStoreLike } from "../core/bulk/bulk-plan-store.js";
 import { createM10GovernanceServices } from "../core/governance/m10-services.js";
 import { IdentityContextService } from "../core/identity/identity-context-service.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
+import { createTeamAccessStore, resolveTeamScopedPrincipal } from "../core/teams/team-access-runtime.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { AuthorizedProjectItemReferenceResolver } from "../core/projects/project-item-reference-resolver.js";
 import { ProjectService } from "../core/projects/project-service.js";
@@ -203,17 +204,24 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
     options.identityRegistry ?? OAuthIdentityRegistry.fromEnvironment(),
   );
   if (!principal) return unauthorized();
+  let scopedPrincipal;
+  try {
+    scopedPrincipal = await resolveTeamScopedPrincipal(principal, createTeamAccessStore());
+  } catch {
+    return json(errorPayload("TEAM_ACL_UNAVAILABLE", "Project authorization is temporarily unavailable."), 503);
+  }
+  if (!scopedPrincipal) return unauthorized();
 
   const client = options.client ?? new GitHubGraphQlClient(config.githubToken);
-  const projects = new ProjectService({ config, client, principal });
+  const projects = new ProjectService({ config, client, principal: scopedPrincipal });
   const providers = new ProjectProviderRegistry([new GitHubProjectsProvider(projects)]);
   const githubProjects = providers.require("github_projects");
   const snapshots = new SnapshotService({ getProjectSnapshot: (owner, number, first) => githubProjects.getSnapshot(owner, number, first) });
   const reads = new HighLevelReadService(snapshots);
-  const identity = new IdentityContextService(principal);
+  const identity = new IdentityContextService(scopedPrincipal);
   const workItems = new WorkItemService({ config, client, projects });
   const auditService = options.auditService ?? new AuditService(200);
-  const writePolicy = new WritePolicy(config, principal);
+  const writePolicy = new WritePolicy(config, scopedPrincipal);
   const writes = new HighLevelWriteService({
     client,
     projects,
@@ -224,7 +232,7 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
   const governance = createM10GovernanceServices({
     config,
     client,
-    principal,
+    principal: scopedPrincipal,
     projects,
     writePolicy,
     audit: auditService,
@@ -263,8 +271,8 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
     }
     if (url.pathname === "/api/v1/project/my-work") {
       const input = myWorkInput.parse(body);
-      const login = principal.githubLogin?.trim();
-      if (!login) throw new Error(`IDENTITY_GITHUB_LOGIN_REQUIRED: Principal '${principal.id}' has no GitHub login mapping.`);
+      const login = scopedPrincipal.githubLogin?.trim();
+      if (!login) throw new Error(`IDENTITY_GITHUB_LOGIN_REQUIRED: Principal '${scopedPrincipal.id}' has no GitHub login mapping.`);
       return json({ ok: true, data: await reads.getMyWork(input.owner, input.number, { ...input, login }) });
     }
     if (url.pathname === "/api/v1/project/item-relationships") {
