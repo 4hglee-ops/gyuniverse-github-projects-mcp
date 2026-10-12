@@ -1,5 +1,6 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { traceMcpRequest } from "./mcp-diagnostics.js";
+import { shouldUseLegacyJsonTransport, serveLegacyJsonTransport } from "./legacy-json-transport.js";
 
 import { type AppConfig, loadConfig } from "../config.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
@@ -92,12 +93,12 @@ export async function handleRemoteMcpRequest(
   }
 
   mark("acl_resolved");
-  const handler = createMcpHandler(() => buildMcpServer({
-    config: effectiveConfig,
-    client,
-    principal,
-  }));
+  const factory = () => buildMcpServer({ config: effectiveConfig, client, principal });
   mark("sdk_dispatch");
+  if (await shouldUseLegacyJsonTransport(request)) {
+    return serveLegacyJsonTransport(request, factory);
+  }
+  const handler = createMcpHandler(factory);
   return handler.fetch(request);
   });
 }

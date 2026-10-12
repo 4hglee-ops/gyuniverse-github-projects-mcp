@@ -122,3 +122,107 @@ test("authenticated Remote MCP initializes and returns a bounded response", { ti
     }
   }
 });
+
+test("opt-in legacy MCP initialize returns JSON instead of SSE", { timeout: 15_000 }, async () => {
+  const values: Record<string, string> = {
+    PUBLIC_BASE_URL: origin,
+    MCP_OAUTH_SIGNING_SECRET: "transport-test-signing-secret-only",
+    MCP_OAUTH_IDENTITIES_JSON: JSON.stringify([{subject:"user:transport-test",accessCode:"synthetic",role:"viewer",projectIds:["PVT_INTEGRATION_TEST"],githubLogin:"transport-test"}]),
+    M12_TEAM_ACL_MODE: "legacy",
+    MCP_LEGACY_JSON_TRANSPORT_ENABLED: "true",
+    MCP_HTTP_DIAGNOSTICS_ENABLED: "false",
+  };
+  const previous = new Map<string,string|undefined>();
+  for (const [key,value] of Object.entries(values)) { previous.set(key,process.env[key]);process.env[key]=value; }
+  try {
+    const now=nowSeconds();
+    const token=await signEnvelope("gypa",{
+      typ:"access_token",aud:origin+"/mcp",scope:"projects:read",sub:"user:transport-test",iat:now,exp:now+120
+    } satisfies AccessTokenPayload);
+    const request=new Request(origin+"/mcp",{
+      method:"POST",
+      headers:{Authorization:"Bearer "+token,Accept:"application/json, text/event-stream","Content-Type":"application/json"},
+      body:JSON.stringify({jsonrpc:"2.0",id:1,method:"initialize",params:{
+        protocolVersion:"2025-06-18",capabilities:{},clientInfo:{name:"transport-ci-smoke",version:"1.0"}
+      }})
+    });
+    const response=await within(handleRemoteMcpRequest(request,{config,client:new NoGitHubCalls()}),8000,()=>{});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get("content-type")??"",/^application\/json/);
+    const result=await response.json() as {jsonrpc:string;result?:unknown};
+    assert.equal(result.jsonrpc,"2.0");
+    assert.ok(result.result);
+
+    // Legacy JSON should also terminate immediately for tool discovery and
+    // a read-only tool call, without treating an SSE keepalive as completion.
+    for (const [id, method, params] of [
+      [2, "tools/list", {}],
+      [3, "tools/call", { name: "get_identity_context", arguments: {} }],
+    ] as const) {
+      const startedAt=Date.now();
+      const call=new Request(origin+"/mcp",{
+        method:"POST",
+        headers:{
+          Authorization:"Bearer "+token,
+          Accept:"application/json, text/event-stream",
+          "Content-Type":"application/json",
+        },
+        body:JSON.stringify({jsonrpc:"2.0",id,method,params}),
+      });
+      const answer=await within(handleRemoteMcpRequest(call,{config,client:new NoGitHubCalls()}),8000,()=>{});
+      assert.equal(answer.status,200,method+" should return HTTP 200");
+      assert.match(answer.headers.get("content-type")??"",/^application\/json/,method+" must use JSON");
+      const json=await answer.json() as { jsonrpc:string; result?:unknown; error?:unknown };
+      assert.equal(json.jsonrpc,"2.0");
+      assert.ok(json.result,method+" should return a JSON-RPC result");
+      assert.equal(json.error,undefined);
+      assert.ok(Date.now()-startedAt<7000,method+" should finish without waiting for SSE timeout");
+    }
+  } finally {
+    for (const [key,value] of previous) { if(value===undefined)delete process.env[key];else process.env[key]=value; }
+  }
+});
+
+test("opt-in legacy JSON leaves authenticated modern MCP requests on the modern handler", {timeout:15000},async()=>{
+  const values:Record<string,string>={
+    PUBLIC_BASE_URL:origin,
+    MCP_OAUTH_SIGNING_SECRET:"modern-ci-signing-secret",
+    MCP_OAUTH_IDENTITIES_JSON:JSON.stringify([{subject:"user:modern-ci",accessCode:"synthetic-modern-code",role:"viewer",projectIds:["PVT_INTEGRATION_TEST"]}]),
+    M12_TEAM_ACL_MODE:"legacy",
+    MCP_LEGACY_JSON_TRANSPORT_ENABLED:"true",
+    MCP_HTTP_DIAGNOSTICS_ENABLED:"false",
+  };
+  const previous=new Map<string,string|undefined>();
+  for(const [key,value] of Object.entries(values)){previous.set(key,process.env[key]);process.env[key]=value;}
+  try{
+    const now=nowSeconds();
+    const token=await signEnvelope("gypa",{
+      typ:"access_token",aud:origin+"/mcp",scope:"projects:read",sub:"user:modern-ci",iat:now,exp:now+120
+    } satisfies AccessTokenPayload);
+    const revision="2026-07-28";
+    const response=await within(handleRemoteMcpRequest(new Request(origin+"/mcp",{
+      method:"POST",
+      headers:{
+        Authorization:"Bearer "+token,
+        Accept:"application/json, text/event-stream",
+        "Content-Type":"application/json",
+        "MCP-Protocol-Version":revision,
+        "Mcp-Method":"tools/list",
+      },
+      body:JSON.stringify({jsonrpc:"2.0",id:17,method:"tools/list",params:{
+        _meta:{
+          "io.modelcontextprotocol/protocolVersion":revision,
+          "io.modelcontextprotocol/clientInfo":{name:"modern-ci",version:"1.0"},
+          "io.modelcontextprotocol/clientCapabilities":{}
+        }
+      }})
+    }),{config,client:new NoGitHubCalls()}),8000,()=>{});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get("content-type")??"",/^application\/json/);
+    const answer=await response.json() as {result?:{tools?:unknown[]};error?:unknown};
+    assert.ok(Array.isArray(answer.result?.tools));
+    assert.equal(answer.error,undefined);
+  }finally{
+    for(const [key,value] of previous){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+  }
+});
