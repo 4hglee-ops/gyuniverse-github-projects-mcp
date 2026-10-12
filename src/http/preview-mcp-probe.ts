@@ -192,8 +192,9 @@ export async function handlePreviewMcpProbe(): Promise<Response> {
     }
   }
 
+  const requireJson = process.env.MCP_LEGACY_JSON_TRANSPORT_ENABLED === "true";
   return Response.json(
-    { ok: steps.length === 3 && steps.every(s => s.status === "ok"), mode: "preview_only", upstreamGitHub: "disabled", steps },
+    { ok: steps.length === 3 && steps.every(s => s.status === "ok" && (!requireJson || s.responseType === "json")), mode: "preview_only", upstreamGitHub: "disabled", steps },
     { headers: { "Cache-Control": "no-store", "Pragma": "no-cache" } },
   );
 }
