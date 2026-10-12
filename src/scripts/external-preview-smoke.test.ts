@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+// @ts-ignore: standalone .mjs CLI test has no TypeScript declarations
 import { parseCurlResponse } from "../../scripts/mcp-preview-external-smoke.mjs";
 
 test("parse external Vercel curl response",()=>{
