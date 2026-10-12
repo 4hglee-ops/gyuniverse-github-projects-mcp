@@ -1,4 +1,5 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
+import { traceMcpRequest } from "./mcp-diagnostics.js";
 
 import { type AppConfig, loadConfig } from "../config.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
@@ -69,17 +70,20 @@ export async function handleRemoteMcpRequest(
     client?: GitHubGraphQlClient;
   },
 ): Promise<Response> {
+  return traceMcpRequest(request, async (mark) => {
   const presentedToken = bearerToken(request);
   if (!presentedToken) return unauthorized();
 
   const access = await oauthAccessTokenPayload(presentedToken);
   if (!access) return unauthorized();
+  mark("oauth_verified");
 
   const baseConfig = options?.config ?? loadConfig();
   const effectiveConfig = configForRemoteScope(baseConfig, access.scope);
   const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
   const legacyPrincipal = resolveRemotePrincipal(access.sub, effectiveConfig);
   if (!legacyPrincipal) return unauthorized();
+  mark("principal_resolved");
   let principal;
   try {
     principal = await resolveTeamScopedPrincipal(legacyPrincipal, createTeamAccessStore());
@@ -87,10 +91,13 @@ export async function handleRemoteMcpRequest(
     return new Response("Authorization unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 
+  mark("acl_resolved");
   const handler = createMcpHandler(() => buildMcpServer({
     config: effectiveConfig,
     client,
     principal,
   }));
+  mark("sdk_dispatch");
   return handler.fetch(request);
+  });
 }
