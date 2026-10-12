@@ -96,7 +96,7 @@ export async function handleRemoteMcpRequest(
     config: effectiveConfig,
     client,
     principal,
-  }));
+  }), { responseMode: "json" });
   mark("sdk_dispatch");
   return handler.fetch(request);
   });
