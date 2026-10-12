@@ -8,6 +8,7 @@ import {
 import { normalizeScope } from "../oauth/stateless.js";
 import { openApiDocument } from "./openapi.js";
 import { handleRemoteMcpRequest } from "./remote-mcp.js";
+import { handlePreviewMcpProbe, previewMcpProbeEnabled } from "./preview-mcp-probe.js";
 import { handleRestApiRequest } from "./rest-api.js";
 
 function metadataResponse(value: Record<string, unknown>): Response {
@@ -78,6 +79,11 @@ export async function handleRemoteHttpRequest(request: Request): Promise<Respons
 
   if (url.pathname.startsWith("/api/v1/")) {
     return handleRestApiRequest(request);
+  }
+
+  if (url.pathname === "/api/v1/internal/preview-mcp-probe") {
+    if (request.method !== "GET" || !previewMcpProbeEnabled()) return new Response("Not Found", { status: 404 });
+    return handlePreviewMcpProbe();
   }
 
   if (url.pathname === "/mcp") {
