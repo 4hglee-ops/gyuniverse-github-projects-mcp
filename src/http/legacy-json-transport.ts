@@ -61,23 +61,34 @@ export async function serveLegacyJsonTransport(
     return closing;
   };
 
-  const onAbort = () => { void close(); };
-  request.signal.addEventListener("abort", onAbort, { once: true });
+  let abortListener: (() => void) | null = null;
+  const aborted = new Promise<Response>((resolve) => {
+    abortListener = () => {
+      void close();
+      // The SDK may leave a buffered JSON response pending after close().
+      // Return promptly without claiming the operation did not execute.
+      resolve(new Response("Request cancelled; execution outcome unknown", {
+        status: 503,
+        headers: { "Cache-Control": "no-store" },
+      }));
+    };
+    request.signal.addEventListener("abort", abortListener, { once: true });
+    if (request.signal.aborted) abortListener();
+  });
 
   try {
-    if (request.signal.aborted) return new Response(null, { status: 503 });
+    if (request.signal.aborted) {
+      return new Response("Request cancelled", { status: 503 });
+    }
     product = makeServer();
     await product.connect(transport);
-
-    const response = await transport.handleRequest(request);
-    // JSON and 202 acknowledgements contain no streaming response body;
-    // the per-request server can be safely released after the reply settles.
-    return response;
+    return await Promise.race([transport.handleRequest(request), aborted]);
   } catch {
-    // Never log or return raw SDK errors, request bodies, or credentials.
     return internalError();
   } finally {
-    request.signal.removeEventListener("abort", onAbort);
-    await close();
+    if (abortListener) request.signal.removeEventListener("abort", abortListener);
+    // Never block the response path on SDK close() during cancellation.
+    // Cleanup is best-effort; a late response does not trigger another call.
+    void close();
   }
 }
