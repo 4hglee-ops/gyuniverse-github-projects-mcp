@@ -152,6 +152,32 @@ test("opt-in legacy MCP initialize returns JSON instead of SSE", { timeout: 15_0
     const result=await response.json() as {jsonrpc:string;result?:unknown};
     assert.equal(result.jsonrpc,"2.0");
     assert.ok(result.result);
+
+    // Legacy JSON should also terminate immediately for tool discovery and
+    // a read-only tool call, without treating an SSE keepalive as completion.
+    for (const [id, method, params] of [
+      [2, "tools/list", {}],
+      [3, "tools/call", { name: "get_identity_context", arguments: {} }],
+    ] as const) {
+      const startedAt=Date.now();
+      const call=new Request(origin+"/mcp",{
+        method:"POST",
+        headers:{
+          Authorization:"Bearer "+token,
+          Accept:"application/json, text/event-stream",
+          "Content-Type":"application/json",
+        },
+        body:JSON.stringify({jsonrpc:"2.0",id,method,params}),
+      });
+      const answer=await within(handleRemoteMcpRequest(call,{config,client:new NoGitHubCalls()}),8000,()=>{});
+      assert.equal(answer.status,200,method+" should return HTTP 200");
+      assert.match(answer.headers.get("content-type")??"",/^application\/json/,method+" must use JSON");
+      const json=await answer.json() as { jsonrpc:string; result?:unknown; error?:unknown };
+      assert.equal(json.jsonrpc,"2.0");
+      assert.ok(json.result,method+" should return a JSON-RPC result");
+      assert.equal(json.error,undefined);
+      assert.ok(Date.now()-startedAt<7000,method+" should finish without waiting for SSE timeout");
+    }
   } finally {
     for (const [key,value] of previous) { if(value===undefined)delete process.env[key];else process.env[key]=value; }
   }
