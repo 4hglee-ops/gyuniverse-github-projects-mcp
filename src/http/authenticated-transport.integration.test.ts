@@ -112,6 +112,7 @@ test("authenticated Remote MCP initializes and returns a bounded response", { ti
       () => controller.abort(),
     );
     assert.equal(response.status, 200, "initialize should return HTTP 200, got " + response.status);
+    assert.match(response.headers.get("content-type") ?? "", /^application\/json(?:;|$)/, "legacy MCP request must honor configured JSON response mode");
     const firstChunk = await readFirstChunk(response, () => controller.abort());
     assert.match(firstChunk, /jsonrpc|result|protocolVersion|data:/);
     assert.ok(Date.now() - startedAt < 14_000, "authenticated MCP response must not hang");
