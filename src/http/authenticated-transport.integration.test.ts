@@ -182,3 +182,47 @@ test("opt-in legacy MCP initialize returns JSON instead of SSE", { timeout: 15_0
     for (const [key,value] of previous) { if(value===undefined)delete process.env[key];else process.env[key]=value; }
   }
 });
+
+test("opt-in legacy JSON leaves authenticated modern MCP requests on the modern handler", {timeout:15000},async()=>{
+  const values:Record<string,string>={
+    PUBLIC_BASE_URL:origin,
+    MCP_OAUTH_SIGNING_SECRET:"modern-ci-signing-secret",
+    MCP_OAUTH_IDENTITIES_JSON:JSON.stringify([{subject:"user:modern-ci",accessCode:"synthetic-modern-code",role:"viewer",projectIds:["PVT_INTEGRATION_TEST"]}]),
+    M12_TEAM_ACL_MODE:"legacy",
+    MCP_LEGACY_JSON_TRANSPORT_ENABLED:"true",
+    MCP_HTTP_DIAGNOSTICS_ENABLED:"false",
+  };
+  const previous=new Map<string,string|undefined>();
+  for(const [key,value] of Object.entries(values)){previous.set(key,process.env[key]);process.env[key]=value;}
+  try{
+    const now=nowSeconds();
+    const token=await signEnvelope("gypa",{
+      typ:"access_token",aud:origin+"/mcp",scope:"projects:read",sub:"user:modern-ci",iat:now,exp:now+120
+    } satisfies AccessTokenPayload);
+    const revision="2026-07-28";
+    const response=await within(handleRemoteMcpRequest(new Request(origin+"/mcp",{
+      method:"POST",
+      headers:{
+        Authorization:"Bearer "+token,
+        Accept:"application/json, text/event-stream",
+        "Content-Type":"application/json",
+        "MCP-Protocol-Version":revision,
+        "Mcp-Method":"tools/list",
+      },
+      body:JSON.stringify({jsonrpc:"2.0",id:17,method:"tools/list",params:{
+        _meta:{
+          "io.modelcontextprotocol/protocolVersion":revision,
+          "io.modelcontextprotocol/clientInfo":{name:"modern-ci",version:"1.0"},
+          "io.modelcontextprotocol/clientCapabilities":{}
+        }
+      }})
+    }),{config,client:new NoGitHubCalls()}),8000,()=>{});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get("content-type")??"",/^application\/json/);
+    const answer=await response.json() as {result?:{tools?:unknown[]};error?:unknown};
+    assert.ok(Array.isArray(answer.result?.tools));
+    assert.equal(answer.error,undefined);
+  }finally{
+    for(const [key,value] of previous){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+  }
+});
