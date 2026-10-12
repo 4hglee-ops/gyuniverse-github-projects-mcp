@@ -122,3 +122,37 @@ test("authenticated Remote MCP initializes and returns a bounded response", { ti
     }
   }
 });
+
+test("opt-in legacy MCP initialize returns JSON instead of SSE", { timeout: 15_000 }, async () => {
+  const values: Record<string, string> = {
+    PUBLIC_BASE_URL: origin,
+    MCP_OAUTH_SIGNING_SECRET: "transport-test-signing-secret-only",
+    MCP_OAUTH_IDENTITIES_JSON: JSON.stringify([{subject:"user:transport-test",accessCode:"synthetic",role:"viewer",projectIds:["PVT_INTEGRATION_TEST"],githubLogin:"transport-test"}]),
+    M12_TEAM_ACL_MODE: "legacy",
+    MCP_LEGACY_JSON_TRANSPORT_ENABLED: "true",
+    MCP_HTTP_DIAGNOSTICS_ENABLED: "false",
+  };
+  const previous = new Map<string,string|undefined>();
+  for (const [key,value] of Object.entries(values)) { previous.set(key,process.env[key]);process.env[key]=value; }
+  try {
+    const now=nowSeconds();
+    const token=await signEnvelope("gypa",{
+      typ:"access_token",aud:origin+"/mcp",scope:"projects:read",sub:"user:transport-test",iat:now,exp:now+120
+    } satisfies AccessTokenPayload);
+    const request=new Request(origin+"/mcp",{
+      method:"POST",
+      headers:{Authorization:"Bearer "+token,Accept:"application/json, text/event-stream","Content-Type":"application/json"},
+      body:JSON.stringify({jsonrpc:"2.0",id:1,method:"initialize",params:{
+        protocolVersion:"2025-06-18",capabilities:{},clientInfo:{name:"transport-ci-smoke",version:"1.0"}
+      }})
+    });
+    const response=await within(handleRemoteMcpRequest(request,{config,client:new NoGitHubCalls()}),8000,()=>{});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get("content-type")??"",/^application\/json/);
+    const result=await response.json() as {jsonrpc:string;result?:unknown};
+    assert.equal(result.jsonrpc,"2.0");
+    assert.ok(result.result);
+  } finally {
+    for (const [key,value] of previous) { if(value===undefined)delete process.env[key];else process.env[key]=value; }
+  }
+});
