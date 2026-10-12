@@ -107,6 +107,8 @@ async function probeStep(
     responseType = type.includes("text/event-stream") ? "sse" :
       type.includes("application/json") ? "json" : "other";
     const returnedSessionId = response.headers.get("mcp-session-id") ?? undefined;
+    // JSON mode must be honored for non-streaming legacy requests.
+    // An SSE fallback indicates the upstream SDK legacy-mode issue remains.
 
     if (!response.body || response.status !== 200) {
       return {
