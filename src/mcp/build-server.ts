@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { type AppConfig } from "../config.js";
 import { AuditService } from "../core/audit/audit-service.js";
+import { assertGitHubAuthDiagnosticAllowed, probeGitHubAuthToken } from "../core/diagnostics/github-auth-status.js";
 import { createM10GovernanceServices } from "../core/governance/m10-services.js";
 import { ProjectChangeService } from "../core/changes/project-change-service.js";
 import type { AuthenticatedPrincipal } from "../core/identity/principal.js";
@@ -68,6 +69,19 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
     bulk: governance.bulk,
     json,
   });
+
+  server.registerTool(
+    "get_github_auth_status",
+    {
+      description: "Admin-only: check the server GitHub token using a read-only GraphQL viewer probe. Never returns the token or GitHub identity. Project permission is not tested.",
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    },
+    async () => {
+      assertGitHubAuthDiagnosticAllowed(principal);
+      return json(await probeGitHubAuthToken(config.githubToken));
+    },
+  );
 
   server.registerTool(
     "list_github_projects",
