@@ -18,7 +18,7 @@ test("parse failed auth response without logging secrets",()=>{
 test("Windows Vercel npm shim resolves to JS entry point without a shell",()=>{
  const shim="C:\\Users\\tester\\AppData\\Roaming\\npm\\vercel.cmd";
  const expected="C:\\Users\\tester\\AppData\\Roaming\\npm\\node_modules\\vercel\\dist\\vc.js";
- const result=resolveWindowsVercelEntrypoint(shim, candidate=>candidate===expected);
+ const result=resolveWindowsVercelEntrypoint(shim, (candidate:string)=>candidate===expected);
  assert.equal(result,expected);
  assert.throws(()=>resolveWindowsVercelEntrypoint("C:\\wrong\\vercel.cmd",()=>false),/not found/);
 });
