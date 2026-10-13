@@ -27,14 +27,36 @@ export function parseCurlResponse(input){
   die("HTTP","could not parse Vercel CLI curl output");
 }
 
+/**
+ * Windows .cmd launchers require cmd.exe. Build a single, allowlisted command
+ * instead of spawn(...,{shell:true}) with unescaped args (Node DEP0190).
+ * OAuth access codes and JSON form bodies are sent via stdin, never argv.
+ */
+export function windowsVercelCommand(args) {
+  for (const item of args) {
+    if (typeof item !== "string" || item.length > 8192 ||
+      /["&|<>^%!\r\n]/.test(item)) {
+      die("Windows CLI", "unsafe command argument rejected");
+    }
+  }
+  return "vercel.cmd " + args.map(value => '"' + value + '"').join(" ");
+}
+
+function spawnVercelCurl(args) {
+  const options = { shell: false, stdio: ["pipe","pipe","pipe"], windowsHide: true };
+  if (process.platform !== "win32") return spawn("vercel", args, options);
+  return spawn(process.env.ComSpec || "cmd.exe",
+    ["/d","/s","/c",windowsVercelCommand(args)], options);
+}
+
 async function http(path,method="GET",headers={},body){
   if(!path.startsWith("/"))die("target","must stay on Preview host");
   const args=["curl",ORIGIN+path,"--silent","--show-error","--include","--max-time","20","--request",method];
   for(const [k,v] of Object.entries(headers))args.push("--header",k+": "+v);
   if(body!==undefined)args.push("--data-binary","@-");
   return await new Promise((ok,no)=>{
-    const started=Date.now(),win=process.platform==="win32";
-    const child=spawn(win?"vercel.cmd":"vercel",args,{shell:win,stdio:["pipe","pipe","pipe"],windowsHide:true});
+    const started=Date.now();
+    const child=spawnVercelCurl(args);
     let stdout="",failed=false;
     const timer=setTimeout(()=>{failed=true;child.kill();},35000);
     child.on("error",()=>{failed=true;no(new Error("Vercel CLI unavailable; install and run vercel login"));});
