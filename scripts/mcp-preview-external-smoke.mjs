@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // External HTTPS smoke for the protected develop Preview. No production, no writes.
 // Vercel CLI 48.8+, curl, Node 22+, and Vercel login are required.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { resolve } from "node:path";
+import { resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ORIGIN="https://gyuniverse-github-projects-mcp-git-develop-skn-34-2nd-5-team.vercel.app";
@@ -28,25 +29,34 @@ export function parseCurlResponse(input){
 }
 
 /**
- * Windows .cmd launchers require cmd.exe. Build a single, allowlisted command
- * instead of spawn(...,{shell:true}) with unescaped args (Node DEP0190).
- * OAuth access codes and JSON form bodies are sent via stdin, never argv.
+ * Resolve the JS entry point behind the npm-installed Windows vercel.cmd shim.
+ *
+ * Calling Node directly avoids cmd.exe argument interpretation (DEP0190
+ * warnings and broken quoting). In particular, bearer headers are passed as
+ * distinct process arguments, not through a shell.
  */
-export function windowsVercelCommand(args) {
-  for (const item of args) {
-    if (typeof item !== "string" || item.length > 8192 ||
-      /["&|<>^%!\r\n]/.test(item)) {
-      die("Windows CLI", "unsafe command argument rejected");
-    }
+export function resolveWindowsVercelEntrypoint(whereOutput, exists = existsSync) {
+  for (const item of String(whereOutput).split(/\r?\n/)) {
+    const shim = item.trim().replace(/^"|"$/g, "");
+    if (!/\.cmd$/i.test(shim)) continue;
+    const candidate = win32.join(win32.dirname(shim),
+      "node_modules", "vercel", "dist", "vc.js");
+    if (exists(candidate)) return candidate;
   }
-  return "vercel.cmd " + args.map(value => '"' + value + '"').join(" ");
+  die("Vercel CLI", "npm-installed vercel.cmd / node_modules/vercel/dist/vc.js not found. Run npm.cmd install -g vercel");
 }
 
 function spawnVercelCurl(args) {
   const options = { shell: false, stdio: ["pipe","pipe","pipe"], windowsHide: true };
   if (process.platform !== "win32") return spawn("vercel", args, options);
-  return spawn(process.env.ComSpec || "cmd.exe",
-    ["/d","/s","/c",windowsVercelCommand(args)], options);
+  const lookup = spawnSync("where.exe", ["vercel.cmd"], {
+    encoding: "utf8", windowsHide: true, timeout: 3000, maxBuffer: 16_384
+  });
+  if (lookup.error || lookup.status !== 0) {
+    die("Vercel CLI", "vercel.cmd not found on PATH; run npm.cmd install -g vercel");
+  }
+  const entrypoint = resolveWindowsVercelEntrypoint(lookup.stdout);
+  return spawn(process.execPath, [entrypoint, ...args], options);
 }
 
 async function http(path,method="GET",headers={},body){
