@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-ignore: standalone .mjs CLI test has no TypeScript declarations
-import { parseCurlResponse } from "../../scripts/mcp-preview-external-smoke.mjs";
+import { parseCurlResponse, windowsVercelCommand } from "../../scripts/mcp-preview-external-smoke.mjs";
 
 test("parse external Vercel curl response",()=>{
  const x=parseCurlResponse("HTTP/1.1 200 Connection established\r\n\r\nHTTP/2 200\r\ncontent-type: application/json\r\n\r\n{\"ok\":true}");
@@ -13,4 +13,12 @@ test("parse failed auth response without logging secrets",()=>{
  const x=parseCurlResponse("HTTP/2 401\nwww-authenticate: Bearer realm=\"test\"\n\nUnauthorized");
  assert.equal(x.status,401);
  assert.equal(x.headers.get("www-authenticate"),'Bearer realm="test"');
+});
+
+test("Windows CLI argument validation rejects shell injection and token exposure",()=>{
+ assert.throws(()=>windowsVercelCommand(["curl","https://a.test/mcp","--header","Authorization: Bearer a&whoami"]),/unsafe command argument/);
+ assert.throws(()=>windowsVercelCommand(["curl","test\"evil"]),/unsafe command argument/);
+ const command=windowsVercelCommand(["curl","https://example.test/health","--request","GET"]);
+ assert.match(command,/^vercel\.cmd /);
+ assert.doesNotMatch(command,/shell=true/);
 });
