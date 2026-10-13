@@ -1,4 +1,5 @@
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
+import { managedSubjectForCode, managedTokenAuthorized } from "../admin/managed-auth.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   AccessTokenPayload,
@@ -287,12 +288,15 @@ function approvalPage(params: AuthorizationParams, error?: string): Response {
   );
 }
 
-function subjectForAccessCode(accessCode: string): string | null {
+async function subjectForAccessCode(accessCode: string): Promise<{subject:string;credentialId?:string}|null> {
   const identity = OAuthIdentityRegistry.fromEnvironment().resolveByAccessCode(accessCode);
-  if (identity) return identity.subject;
+  if (identity) return {subject:identity.subject};
+
+  const managed = await managedSubjectForCode(accessCode);
+  if (managed) return managed;
 
   const expectedTeamCode = oauthTeamCode();
-  if (expectedTeamCode && accessCode === expectedTeamCode) return LEGACY_TEAM_SUBJECT;
+  if (expectedTeamCode && accessCode === expectedTeamCode) return {subject:LEGACY_TEAM_SUBJECT};
   return null;
 }
 
@@ -316,7 +320,7 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
   const error = await validateAuthorization(parsed.params);
   if (error) return new Response(error, { status: 400 });
 
-  const subject = subjectForAccessCode(parsed.accessCode);
+  const subject = await subjectForAccessCode(parsed.accessCode);
   if (!subject) {
     return approvalPage(parsed.params, "접근 코드가 올바르지 않습니다.");
   }
@@ -331,7 +335,8 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
     redirectUri: parsed.params.redirectUri,
     resource: effectiveResource(parsed.params),
     scope: parsed.params.scope,
-    sub: subject,
+    sub: subject.subject,
+    ...(subject.credentialId ? {credentialId:subject.credentialId} : {}),
     codeChallenge: parsed.params.codeChallenge,
     clientMode,
     iat: now,
@@ -386,6 +391,7 @@ async function issueTokens(
   clientId: string,
   subject: string,
   clientMode: OAuthClientMode,
+  credentialId?: string,
 ): Promise<Response> {
   const now = nowSeconds();
   const accessPayload: AccessTokenPayload = {
@@ -393,6 +399,7 @@ async function issueTokens(
     aud: resource,
     scope,
     sub: subject,
+    ...(credentialId ? {credentialId} : {}),
     iat: now,
     exp: now + ACCESS_TOKEN_TTL_SECONDS,
   };
@@ -402,6 +409,7 @@ async function issueTokens(
     scope,
     clientId,
     sub: subject,
+    ...(credentialId ? {credentialId} : {}),
     clientMode,
     iat: now,
     exp: now + REFRESH_TOKEN_TTL_SECONDS,
@@ -462,7 +470,8 @@ async function handleAuthorizationCode(request: Request, form: FormData): Promis
     return tokenError("invalid_grant", "Authorization code has already been used.");
   }
 
-  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub, mode);
+  if (!(await managedTokenAuthorized(payload.sub,payload.credentialId))) return tokenError("invalid_grant","Credential revoked or disabled.");
+  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub, mode,payload.credentialId);
 }
 
 async function handleRefreshToken(request: Request, form: FormData): Promise<Response> {
@@ -492,7 +501,8 @@ async function handleRefreshToken(request: Request, form: FormData): Promise<Res
     return tokenError("invalid_client", "Public PKCE clients must not use a client secret.", 401);
   }
 
-  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub, mode);
+  if (!(await managedTokenAuthorized(payload.sub,payload.credentialId))) return tokenError("invalid_grant","Credential revoked or disabled.");
+  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub, mode,payload.credentialId);
 }
 
 export async function tokenOAuth(request: Request): Promise<Response> {
