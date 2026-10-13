@@ -20,7 +20,7 @@ export async function managedPrincipalForToken(
 }
 
 export async function managedTokenAuthorized(subject:string,credentialId:string|undefined):Promise<boolean> {
-  if(!credentialId)return true; // Preserve legacy stateless identity tokens.
+  if(!credentialId)return !subject.startsWith("user:managed:"); // Preserve legacy tokens; never mint unmanaged managed-subject tokens.
   if(!adminConsoleEnabled())return false;
   const record=await new ManagedCredentialStore().resolveIssued(credentialId,subject);
   return !!record;
