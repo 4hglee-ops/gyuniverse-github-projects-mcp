@@ -1,4 +1,5 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
+import { managedPrincipalForToken } from "../admin/managed-auth.js";
 import { traceMcpRequest } from "./mcp-diagnostics.js";
 import { shouldUseLegacyJsonTransport, serveLegacyJsonTransport } from "./legacy-json-transport.js";
 
@@ -82,7 +83,9 @@ export async function handleRemoteMcpRequest(
   const baseConfig = options?.config ?? loadConfig();
   const effectiveConfig = configForRemoteScope(baseConfig, access.scope);
   const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
-  const legacyPrincipal = resolveRemotePrincipal(access.sub, effectiveConfig);
+  const legacyPrincipal = access.credentialId
+    ? await managedPrincipalForToken(access.sub, access.credentialId)
+    : resolveRemotePrincipal(access.sub, effectiveConfig);
   if (!legacyPrincipal) return unauthorized();
   mark("principal_resolved");
   let principal;
