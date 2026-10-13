@@ -37,7 +37,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'none'; base-uri 'none'; form-action 'self'; connect-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'"
+          "value": "default-src 'none'; base-uri 'none'; form-action 'self'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'self'; frame-ancestors 'none'"
         },
         {
           "key": "X-Frame-Options",
