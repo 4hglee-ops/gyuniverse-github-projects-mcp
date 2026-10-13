@@ -29,7 +29,7 @@ td,th{text-align:left;padding:9px;border-bottom:1px solid var(--border)}.muted{c
 <p><button id="issue">접근 키 자동 발급</button></p><p class="muted">키는 최초 발급 시에만 표시됩니다. 복사해 안전하게 보관하세요.</p>
 <div id="secret-panel" class="hidden"><div id="one-time"></div><p><button id="copy">키 복사</button><button id="hide">표시 닫기</button></p></div>
 </section></div>
-<section class="panel"><h2>사용자 / 역할 / 프로젝트 권한</h2><table><thead><tr><th>이름</th><th>역할</th><th>Project 노드 ID</th><th>활성</th><th>동작</th></tr></thead><tbody id="users"></tbody></table></section>
+<section class="panel"><h2>사용자 / 역할 / 프로젝트 권한</h2><p>역할과 접근 가능한 Project를 수정한 뒤 저장하세요. 사용자 비활성화 시 기존 관리형 OAuth 인증도 거부됩니다.</p><table><thead><tr><th>이름</th><th>역할</th><th>Project 노드 ID</th><th>활성</th><th>동작</th></tr></thead><tbody id="users"></tbody></table></section>
 <section class="panel"><h2>발급된 키 (원문 비표시)</h2><table><thead><tr><th>사용자</th><th>발급</th><th>만료</th><th>상태</th><th>동작</th></tr></thead><tbody id="credentials"></tbody></table></section>
 <section class="panel"><h2>관리 감사 로그</h2><div id="audit"></div></section>
 </section>
@@ -53,9 +53,21 @@ function showApp(active){$("login").classList.toggle("hidden",active);$("app").c
 function options(){const sel=$("user-select");sel.replaceChildren();for(const u of overview.users||[]){if(!u.enabled)continue;const o=element("option",u.displayName+" · "+u.role);o.value=u.subject;sel.append(o);}}
 function users(){const root=$("users");root.replaceChildren();for(const u of overview.users||[]){
  const tr=document.createElement("tr");
- for(const v of [u.displayName,u.role,(u.projectIds||[]).join(", "),u.enabled?"활성":"중지"])tr.append(element("td",v));
- const cell=document.createElement("td"),button=element("button",u.enabled?"비활성화":"활성화");
- button.onclick=async()=>{try{await api("users/update","POST",{subject:u.subject,role:u.role,projectIds:u.projectIds,enabled:!u.enabled});await refresh();}catch(e){status(e.message);}};
+ tr.append(element("td",u.displayName));
+ const roleCell=document.createElement("td"),roleSelect=document.createElement("select");
+ for(const role of ["viewer","member","admin"]){const option=element("option",role);option.value=role;option.selected=role===u.role;roleSelect.append(option);}
+ roleCell.append(roleSelect);tr.append(roleCell);
+ const projectCell=document.createElement("td"),projectInput=document.createElement("input");
+ projectInput.value=(u.projectIds||[]).join(", ");projectInput.setAttribute("aria-label","Project 노드 ID");
+ projectCell.append(projectInput);tr.append(projectCell);
+ const activeCell=document.createElement("td"),active=document.createElement("input");
+ active.type="checkbox";active.checked=u.enabled;active.setAttribute("aria-label","활성 사용자");activeCell.append(active);tr.append(activeCell);
+ const cell=document.createElement("td"),button=element("button","변경 저장");
+ button.onclick=async()=>{try{
+ const projectIds=projectInput.value.split(",").map(x=>x.trim()).filter(Boolean);
+ await api("users/update","POST",{subject:u.subject,role:roleSelect.value,projectIds,enabled:active.checked});
+ await refresh();
+ }catch(e){status(e.message);}};
  cell.append(button);tr.append(cell);root.append(tr);
 }}
 function credentials(){const root=$("credentials");root.replaceChildren();for(const c of overview.credentials||[]){
