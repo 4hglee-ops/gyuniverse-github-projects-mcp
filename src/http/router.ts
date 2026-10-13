@@ -1,3 +1,4 @@
+import { handleAdminRequest } from "../admin/console.js";
 import {
   authorizationServerMetadata,
   authorizeOAuth,
@@ -51,6 +52,8 @@ async function logOAuthScopeDiagnostic(request: Request): Promise<void> {
 
 export async function handleRemoteHttpRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
+
+  if (url.pathname.startsWith("/api/admin/v1/")) return handleAdminRequest(request);
 
   if (url.pathname === "/.well-known/oauth-protected-resource") {
     if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });

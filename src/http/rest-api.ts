@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { managedPrincipalForToken } from "../admin/managed-auth.js";
 
 import { type AppConfig, loadConfig } from "../config.js";
 import { AuditService } from "../core/audit/audit-service.js";
@@ -198,11 +199,9 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
 
   const baseConfig = options.config ?? loadConfig();
   const config = configForRemoteScope(baseConfig, access.scope);
-  const principal = resolveRemotePrincipal(
-    access.sub,
-    config,
-    options.identityRegistry ?? OAuthIdentityRegistry.fromEnvironment(),
-  );
+  const principal = access.credentialId
+    ? await managedPrincipalForToken(access.sub,access.credentialId)
+    : resolveRemotePrincipal(access.sub,config,options.identityRegistry ?? OAuthIdentityRegistry.fromEnvironment());
   if (!principal) return unauthorized();
   let scopedPrincipal;
   try {
