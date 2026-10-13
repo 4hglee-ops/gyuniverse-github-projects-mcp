@@ -115,7 +115,7 @@ export function managedPrincipal(record:ManagedRecord):AuthenticatedPrincipal {
   });
 }
 
-export async function handleAdminRequest(req:Request,store?:ManagedCredentialStore):Promise<Response> {
+export async function handleAdminRequest(req:Request,store?:ManagedCredentialStore,checkRate?: (ip:string)=>Promise<boolean>):Promise<Response> {
   if(!adminConsoleEnabled())return new Response("Not Found",{status:404});
   const url=new URL(req.url);
   if(!url.pathname.startsWith("/api/admin/v1/"))return new Response("Not Found",{status:404});
@@ -128,7 +128,7 @@ export async function handleAdminRequest(req:Request,store?:ManagedCredentialSto
         return json({error:"ADMIN_CONFIG_UNAVAILABLE"},503);
       const ip=(req.headers.get("x-vercel-forwarded-for")??req.headers.get("x-forwarded-for")??"").split(",")[0]?.trim()??"";
       if(ip.length>150)return json({error:"INVALID_REQUEST"},400);
-      const limiter=await loginRateLimiter();
+      const limiter=checkRate?{check:checkRate}:await loginRateLimiter();
       if(!limiter)return json({error:"ADMIN_LOGIN_RATE_LIMIT_UNAVAILABLE"},503);
       const attempt=await limiter.check(ip||"unknown");
       if(!attempt)return json({error:"TOO_MANY_REQUESTS"},429);
