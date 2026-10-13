@@ -45,11 +45,13 @@ test("console never responds when flag is off or in Production",async()=>{
 });
 test("console sessions reject other origins, wrong password and CSRF",async()=>{
  await scoped(async()=>{
-  const wrong=await handleAdminRequest(post("session",{password:"wrong"}));assert.equal(wrong.status,401);
+  const wrong=await handleAdminRequest(post("session",{password:"wrong"}),undefined,async()=>true);assert.equal(wrong.status,401);
   const foreign=new Request(ROOT+"/api/admin/v1/session",{method:"POST",headers:{"origin":"https://evil.example","content-type":"application/json"},body:JSON.stringify({password:process.env.GYP_ADMIN_UI_PASSWORD})});
   assert.equal((await handleAdminRequest(foreign)).status,403);
-  const login=await handleAdminRequest(post("session",{password:process.env.GYP_ADMIN_UI_PASSWORD}));
+  const login=await handleAdminRequest(post("session",{password:process.env.GYP_ADMIN_UI_PASSWORD}),undefined,async()=>true);
   assert.equal(login.status,200);
+  const limited=await handleAdminRequest(post("session",{password:process.env.GYP_ADMIN_UI_PASSWORD}),undefined,async()=>false);
+  assert.equal(limited.status,429);
   assert.match(login.headers.get("set-cookie")??"",/HttpOnly; Secure; SameSite=Strict/);
   const auth=await login.json() as {csrf:string};
   const cookie=login.headers.get("set-cookie")!.split(";")[0];
