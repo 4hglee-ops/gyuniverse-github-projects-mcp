@@ -1,9 +1,28 @@
 import { createHash, randomBytes, timingSafeEqual, createHmac } from "node:crypto";
+import { Redis } from "@upstash/redis";
 import { principalForRole, type AuthenticatedPrincipal, type ProjectRole } from "../core/identity/principal.js";
 
 const sessionCookie = "gyp_admin_session";
 const sessionAge = 60 * 60 * 2;
 type ManagedRecord = { subject:string;role:ProjectRole;projectIds:string[];displayName:string|null;githubLogin:string|null;credentialId:string };
+
+/**
+ * Fail closed if the Preview administrator login has no shared limiter.
+ * All serverless invocations use one dedicated Upstash namespace.
+ */
+async function loginRateLimiter():Promise<{check:(ip:string)=>Promise<boolean>}|null>{
+ const url=process.env.GYP_ADMIN_RATE_LIMIT_REDIS_URL;
+ const token=process.env.GYP_ADMIN_RATE_LIMIT_REDIS_TOKEN;
+ if(!url||!token)return null;
+ const redis=new Redis({url,token});
+ return {check:async(ip:string)=>{
+   const slot=Math.floor(Date.now()/600_000);
+   const key="gyp:admin:login:"+createHash("sha256").update(ip).digest("hex")+":"+slot;
+   const count=await redis.incr(key);
+   if(count===1)await redis.expire(key,600);
+   return count<=8;
+ }};
+}
 
 export function adminConsoleEnabled():boolean {
   return process.env.GYP_ADMIN_CONSOLE_ENABLED === "true" && process.env.VERCEL_ENV !== "production";
@@ -104,6 +123,16 @@ export async function handleAdminRequest(req:Request,store?:ManagedCredentialSto
     if(req.method==="POST"&&!secureOrigin(req))return json({error:"ORIGIN_DENIED"},403);
     const path=url.pathname.slice("/api/admin/v1/".length);
     if(path==="session"&&req.method==="POST"){
+      const authSecret=secureEnv("GYP_ADMIN_UI_PASSWORD");
+      if(authSecret===secureEnv("GYP_ADMIN_SESSION_SECRET"))
+        return json({error:"ADMIN_CONFIG_UNAVAILABLE"},503);
+      const ip=(req.headers.get("x-vercel-forwarded-for")??req.headers.get("x-forwarded-for")??"").split(",")[0]?.trim()??"";
+      if(ip.length>150)return json({error:"INVALID_REQUEST"},400);
+      const limiter=await loginRateLimiter();
+      if(!limiter)return json({error:"ADMIN_LOGIN_RATE_LIMIT_UNAVAILABLE"},503);
+      const attempt=await limiter.check(ip||"unknown");
+      if(!attempt)return json({error:"TOO_MANY_REQUESTS"},429);
+
       const data=await req.json() as {password?:unknown};
       const expected=secureEnv("GYP_ADMIN_UI_PASSWORD");
       const supplied=typeof data.password==="string"?data.password:"";
