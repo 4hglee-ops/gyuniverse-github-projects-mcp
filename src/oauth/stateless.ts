@@ -1,3 +1,5 @@
+import { managedTokenAuthorized } from "../admin/managed-auth.js";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -26,6 +28,7 @@ export interface AuthorizationCodePayload {
   resource: string;
   scope: string;
   sub: string;
+  credentialId?: string;
   codeChallenge: string;
   clientMode?: OAuthClientMode;
   iat: number;
@@ -37,6 +40,7 @@ export interface AccessTokenPayload {
   aud: string;
   scope: string;
   sub: string;
+  credentialId?: string;
   iat: number;
   exp: number;
 }
@@ -47,6 +51,7 @@ export interface RefreshTokenPayload {
   scope: string;
   clientId: string;
   sub: string;
+  credentialId?: string;
   clientMode?: OAuthClientMode;
   iat: number;
   exp: number;
@@ -245,5 +250,6 @@ export async function oauthAccessTokenPayload(token: string): Promise<AccessToke
   if (payload.exp <= nowSeconds()) return null;
   if (payload.aud !== canonicalMcpResource()) return null;
   if (!scopeIncludes(payload.scope, OAUTH_READ_SCOPE)) return null;
+  if (!(await managedTokenAuthorized(payload.sub,payload.credentialId))) return null;
   return payload;
 }
