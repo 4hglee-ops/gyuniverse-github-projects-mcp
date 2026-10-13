@@ -44,3 +44,13 @@
 - Preview에만 opt-in 활성화 후 관리자 테스트 사용자 발급
 - 실제 Project 읽기만 검증, 변이 없음
 - Issue #18 타임아웃 검증과 병행하되 Production 전환 별도 결정
+
+## 2026-10-13 Preview 배포 상태
+
+- Draft PR #20 관리 화면은 보호된 Vercel Preview에서 HTTP 200 응답 확인.
+- 관리 API는 플래그가 없어서 HTTP 404를 반환하며 비활성 상태 검증됨.
+- 브랜치 Preview에 관리자 비밀, Supabase 연결값, Redis 로그인 rate-limit 설정을 아직 완료하지 않았다.
+- 보안 강화: 관리자 로그인 시 Preview 전용 Redis 기반 10분당 최대 8회 시도 (실패 시 기본 거부) 및 관리자 비밀번호·세션 서명 비밀값 분리 확인. `GYP_ADMIN_RATE_LIMIT_REDIS_URL`, `GYP_ADMIN_RATE_LIMIT_REDIS_TOKEN` 필요.
+- 별도의 브랜치 전용 `M12_SUPABASE_URL`, `M12_SUPABASE_SERVICE_ROLE_KEY`가 필요하다. `develop` 브랜치 변수는 이 기능 브랜치로 자동 전파된다고 가정하지 않는다.
+- Bootstrap 필요: `GYP_ADMIN_UI_PASSWORD`, `GYP_ADMIN_SESSION_SECRET` (서로 다른 32바이트 이상의 무작위 비밀). 공개 대화/PR/로그에 원문 입력 금지.
+- 관리자 콘솔 로그인은 **실제 Preview 인증 및 브라우저 테스트가 아직 미완료**. Production 배포/병합은 금지.
