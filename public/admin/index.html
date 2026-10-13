@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gyuniverse Projects MCP · Admin</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui;--bg:#0b1220;--surface:#151f30;--border:#344155;--text:#eef3ff;--sub:#a8b6cd}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}header{padding:20px 28px;border-bottom:1px solid var(--border)}
+main{max-width:1100px;margin:auto;padding:24px}.panel{border:1px solid var(--border);background:var(--surface);padding:20px;border-radius:14px;margin-bottom:18px}
+h1{font-size:21px;margin:0}h2{font-size:16px;margin:0 0 15px}p{color:var(--sub)}
+label{display:block;margin:10px 0 4px;color:var(--sub);font-size:13px}input,select,button,textarea{font:inherit;color:var(--text);background:#243149;border:1px solid var(--border);padding:10px;border-radius:8px;max-width:100%}
+button{cursor:pointer}button:hover{border-color:#91a9ff}input,select{width:100%}button{width:auto}.primary{background:#405cb0}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.hidden{display:none}table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{text-align:left;padding:9px;border-bottom:1px solid var(--border)}.muted{color:var(--sub)}#one-time{word-break:break-all;white-space:pre-wrap;background:#0b1220;padding:12px;border-radius:7px}
+@media(max-width:720px){.grid{grid-template-columns:1fr}main{padding:12px}table{display:block;overflow-x:auto}}
+</style></head><body>
+<header><h1>Gyuniverse Projects MCP <span class="muted">Admin · Preview</span></h1></header><main>
+<section id="login" class="panel"><h2>관리자 로그인</h2><p>일반 MCP 접근 코드와 별개의 관리자 비밀번호를 입력하세요.</p>
+<form id="login-form"><label>관리자 비밀번호 (최소 32자)</label><input id="password" type="password" required autocomplete="current-password"><p><button class="primary">로그인</button></p></form></section>
+<section id="app" class="hidden">
+<div class="row"><button id="refresh">새로고침</button><button id="logout">로그아웃</button></div>
+<div class="grid">
+<section class="panel"><h2>사용자 등록</h2><form id="create">
+<label>표시 이름</label><input id="display-name" maxlength="100" required>
+<label>GitHub 로그인 (선택)</label><input id="github-login" maxlength="100">
+<label>역할</label><select id="role"><option>viewer</option><option>member</option><option>admin</option></select>
+<label>허용 프로젝트 노드 ID (쉼표 구분)</label><input id="projects" required placeholder="PVT_...">
+<p><button class="primary">사용자 추가</button></p></form></section>
+<section class="panel"><h2>키 발급</h2>
+<label>대상 사용자</label><select id="user-select"></select>
+<p><button id="issue">접근 키 자동 발급</button></p><p class="muted">키는 최초 발급 시에만 표시됩니다. 복사해 안전하게 보관하세요.</p>
+<div id="secret-panel" class="hidden"><div id="one-time"></div><p><button id="copy">키 복사</button><button id="hide">표시 닫기</button></p></div>
+</section></div>
+<section class="panel"><h2>사용자 / 역할 / 프로젝트 권한</h2><table><thead><tr><th>이름</th><th>역할</th><th>Project 노드 ID</th><th>활성</th><th>동작</th></tr></thead><tbody id="users"></tbody></table></section>
+<section class="panel"><h2>발급된 키 (원문 비표시)</h2><table><thead><tr><th>사용자</th><th>발급</th><th>만료</th><th>상태</th><th>동작</th></tr></thead><tbody id="credentials"></tbody></table></section>
+<section class="panel"><h2>관리 감사 로그</h2><div id="audit"></div></section>
+</section>
+<div id="status" role="status" class="muted"></div></main>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+let csrf="",oneTime="",overview=null;
+function element(tag,value){const e=document.createElement(tag);e.textContent=String(value??"");return e;}
+function status(message){$("status").textContent=message;}
+async function api(path,method="GET",body) {
+ const response=await fetch("/api/admin/v1/"+path,{
+  method,credentials:"same-origin",headers:{"Content-Type":"application/json",...(method==="POST"?{"X-CSRF-Token":csrf}:{})},
+  ...(body?{body:JSON.stringify(body)}:{})
+ });
+ const data=await response.json().catch(()=>({error:"INVALID_RESPONSE"}));
+ if(!response.ok)throw Error(data.error||"요청 실패: "+response.status);
+ return data;
+}
+function showApp(active){$("login").classList.toggle("hidden",active);$("app").classList.toggle("hidden",!active);}
+function options(){const sel=$("user-select");sel.replaceChildren();for(const u of overview.users||[]){if(!u.enabled)continue;const o=element("option",u.displayName+" · "+u.role);o.value=u.subject;sel.append(o);}}
+function users(){const root=$("users");root.replaceChildren();for(const u of overview.users||[]){
+ const tr=document.createElement("tr");
+ for(const v of [u.displayName,u.role,(u.projectIds||[]).join(", "),u.enabled?"활성":"중지"])tr.append(element("td",v));
+ const cell=document.createElement("td"),button=element("button",u.enabled?"비활성화":"활성화");
+ button.onclick=async()=>{try{await api("users/update","POST",{subject:u.subject,role:u.role,projectIds:u.projectIds,enabled:!u.enabled});await refresh();}catch(e){status(e.message);}};
+ cell.append(button);tr.append(cell);root.append(tr);
+}}
+function credentials(){const root=$("credentials");root.replaceChildren();for(const c of overview.credentials||[]){
+ const u=(overview.users||[]).find(x=>x.subject===c.subject);
+ const tr=document.createElement("tr");
+ for(const v of [u?.displayName||c.subject,c.createdAt,c.expiresAt,c.revokedAt?"폐기":Date.parse(c.expiresAt)<Date.now()?"만료":"활성"])tr.append(element("td",v));
+ const cell=document.createElement("td");
+ if(!c.revokedAt){const button=element("button","폐기");button.onclick=async()=>{if(!confirm("이 접근 키를 폐기할까요?"))return;try{await api("credentials/revoke","POST",{id:c.id});await refresh();}catch(e){status(e.message);}};cell.append(button);}
+ tr.append(cell);root.append(tr);
+}}
+function render(){options();users();credentials();const root=$("audit");root.replaceChildren();for(const entry of overview.audit||[]){root.append(element("p",entry.createdAt+" · "+entry.action+" · "+(entry.subject||"-")));}}
+async function refresh(){overview=await api("overview");render();status("최신 데이터 로드 완료");}
+$("login-form").onsubmit=async e=>{e.preventDefault();try{const d=await api("session","POST",{password:$("password").value});csrf=d.csrf;$("password").value="";showApp(true);await refresh();}catch(err){status(err.message);}};
+$("refresh").onclick=()=>refresh().catch(err=>status(err.message));
+$("logout").onclick=async()=>{try{await api("logout","POST",{});}finally{oneTime="";csrf="";showApp(false);}};
+$("create").onsubmit=async e=>{e.preventDefault();try{
+ const projectIds=$("projects").value.split(",").map(x=>x.trim()).filter(Boolean);
+ await api("users","POST",{displayName:$("display-name").value,githubLogin:$("github-login").value,role:$("role").value,projectIds});
+ e.target.reset();await refresh();}catch(err){status(err.message);}};
+$("issue").onclick=async()=>{try{const d=await api("credentials","POST",{subject:$("user-select").value});oneTime=d.secret;$("one-time").textContent=oneTime;$("secret-panel").classList.remove("hidden");await refresh();status("접근 키 발급 완료. 최초 1회 표시합니다.");}catch(err){status(err.message);}};
+$("copy").onclick=()=>navigator.clipboard.writeText(oneTime).then(()=>status("클립보드로 복사됨")).catch(()=>status("복사 실패"));
+$("hide").onclick=()=>{oneTime="";$("one-time").textContent="";$("secret-panel").classList.add("hidden");};
+api("session").then(d=>{csrf=d.csrf;showApp(true);return refresh();}).catch(()=>showApp(false));
+</script></body></html>
