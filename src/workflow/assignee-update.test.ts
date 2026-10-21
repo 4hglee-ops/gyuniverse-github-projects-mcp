@@ -56,7 +56,7 @@ test("assignment mutates once and verifies the requested login", async () => {
   const client = clientFrom([
     user,
     item([]),
-    { addAssigneesToAssignable: { assignable: { id: "ISSUE_NODE" } } },
+    { addAssigneesToAssignable: { clientMutationId: null } },
     item([{ id: "USER_NODE", login: "4hglee-ops" }]),
   ], queries);
 
@@ -70,6 +70,9 @@ test("assignment mutates once and verifies the requested login", async () => {
   assert.equal(result.verified, true);
   assert.equal(result.after[0]?.login, "4hglee-ops");
   assert.equal(queries.filter((query) => query.includes("addAssigneesToAssignable")).length, 1);
+  const mutationQuery = queries.find((query) => query.includes("addAssigneesToAssignable"));
+  assert.ok(mutationQuery?.includes("clientMutationId"));
+  assert.equal(mutationQuery?.includes("assignable { id }"), false);
 });
 
 test("assignment rejects a Project item from another Project before mutation", async () => {
