@@ -106,9 +106,9 @@ export function assertKbeautyWbsTarget(owner: string, number: number, projectId:
 
 export function planKbeautyWbsFields(
   rawFields: readonly unknown[],
-  owner = KBEAUTY_WBS_PROJECT.owner,
-  number = KBEAUTY_WBS_PROJECT.number,
-  projectId = KBEAUTY_WBS_PROJECT.id,
+  owner: string = KBEAUTY_WBS_PROJECT.owner,
+  number: number = KBEAUTY_WBS_PROJECT.number,
+  projectId: string = KBEAUTY_WBS_PROJECT.id,
 ): WbsSetupPlan {
   assertKbeautyWbsTarget(owner, number, projectId);
   const fields = normalizeFields(rawFields);
