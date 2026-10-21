@@ -20,6 +20,7 @@ import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
 import { registerRelationshipTools } from "./relationship-tools.js";
 import { registerRelationshipWriteTools } from "./relationship-write-tools.js";
 import { registerBulkPlanTools } from "./bulk-plan-tools.js";
+import { WbsFieldSetupService } from "../project-foundation/wbs-field-setup.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -59,6 +60,19 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   registerCheckpointTools({ server, changes: changeService, json });
   registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, principal, json });
   registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, workItems: workItemService, projectIdOf, json });
+  const wbsFields = new WbsFieldSetupService({ client, projects: projectService, writePolicy, principal });
+  server.registerTool("preview_kbeauty_wbs_fields", {
+    description: "Read-only preview of seven WBS Project fields for gyuniverse-hq Project #3; no changes to other Projects.",
+    inputSchema: z.object({ owner: z.literal("gyuniverse-hq"), number: z.literal(3) }),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async ({ owner, number }) => json(await wbsFields.preview(owner, number)));
+
+  server.registerTool("apply_kbeauty_wbs_fields", {
+    description: "Admin-only guarded creation of missing WBS fields in Project #3. Non-destructive and verifies each field; preview first.",
+    inputSchema: z.object({ owner: z.literal("gyuniverse-hq"), number: z.literal(3) }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async ({ owner, number }) => json(await wbsFields.apply(owner, number)));
+
   registerBulkPlanTools({
     server,
     bulk: governance.bulk,
