@@ -55,6 +55,15 @@ function normalizeRecord(value: unknown): OAuthIdentityRecord {
   };
 }
 
+function identityRecordsFromEnvironment(name: string): unknown[] {
+  const raw = process.env[name]?.trim();
+  if (!raw) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new Error(`${name} must be valid JSON.`); }
+  if (!Array.isArray(parsed)) throw new Error(`${name} must be a JSON array.`);
+  return parsed;
+}
+
 export class OAuthIdentityRegistry {
   private readonly records: OAuthIdentityRecord[];
 
@@ -71,12 +80,10 @@ export class OAuthIdentityRegistry {
   }
 
   static fromEnvironment(): OAuthIdentityRegistry {
-    const raw = process.env.MCP_OAUTH_IDENTITIES_JSON?.trim();
-    if (!raw) return new OAuthIdentityRegistry([]);
-    let parsed: unknown;
-    try { parsed = JSON.parse(raw); } catch { throw new Error("MCP_OAUTH_IDENTITIES_JSON must be valid JSON."); }
-    if (!Array.isArray(parsed)) throw new Error("MCP_OAUTH_IDENTITIES_JSON must be a JSON array.");
-    return new OAuthIdentityRegistry(parsed.map(normalizeRecord));
+    return new OAuthIdentityRegistry([
+      ...identityRecordsFromEnvironment("MCP_OAUTH_IDENTITIES_JSON"),
+      ...identityRecordsFromEnvironment("MCP_OAUTH_ADDITIONAL_IDENTITIES_JSON"),
+    ]);
   }
 
   resolveByAccessCode(accessCode: string): OAuthIdentityRecord | null {
