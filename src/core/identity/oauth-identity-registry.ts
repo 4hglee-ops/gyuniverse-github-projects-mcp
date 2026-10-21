@@ -83,7 +83,7 @@ export class OAuthIdentityRegistry {
     return new OAuthIdentityRegistry([
       ...identityRecordsFromEnvironment("MCP_OAUTH_IDENTITIES_JSON"),
       ...identityRecordsFromEnvironment("MCP_OAUTH_ADDITIONAL_IDENTITIES_JSON"),
-    ]);
+    ].map(normalizeRecord));
   }
 
   resolveByAccessCode(accessCode: string): OAuthIdentityRecord | null {
