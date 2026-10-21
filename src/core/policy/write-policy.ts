@@ -14,6 +14,7 @@ export type WriteOperation =
   | "capture_backlog"
   | "create_work_item"
   | "update_project_item_field"
+  | "configure_project_fields"
   | "update_status"
   | "update_priority"
   | "add_sub_issue"
@@ -30,6 +31,7 @@ const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
   capture_backlog: "item.add",
   create_work_item: "item.create",
   update_project_item_field: "item.update_field",
+  configure_project_fields: "item.update_field",
   update_status: "item.update_status",
   update_priority: "item.update_priority",
   add_sub_issue: "item.relationship.write",
