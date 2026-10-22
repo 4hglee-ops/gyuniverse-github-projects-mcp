@@ -17,7 +17,7 @@ interface RegisterHighLevelReadToolsOptions {
 const projectInput = z.object({
   owner: z.string().min(1),
   number: z.number().int().min(1),
-  first: z.number().int().min(1).max(100).default(100),
+  first: z.number().int().min(1).max(500).default(500),
   includeArchived: z.boolean().default(false),
 });
 
