@@ -12,6 +12,7 @@ test("SnapshotService delegates snapshot reads and reports bounded coverage", as
         snapshotAt: "2026-09-05T00:00:00.000Z",
         owner,
         itemCount: 2,
+        hasMoreItems: false,
         items: [{ itemId: "1" }, { itemId: "2" }],
       };
     },
@@ -23,7 +24,7 @@ test("SnapshotService delegates snapshot reads and reports bounded coverage", as
   assert.deepEqual(service.coverage(snapshot, 50, "bounded"), {
     requestedItems: 50,
     returnedItems: 2,
-    completeBeyondFirstPage: false,
-    note: "bounded",
+    completeBeyondFirstPage: true,
+    note: "Complete result. bounded",
   });
 });
