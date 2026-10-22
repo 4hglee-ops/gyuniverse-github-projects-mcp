@@ -102,7 +102,7 @@ export class HighLevelReadService {
   constructor(private readonly snapshots: SnapshotService) {}
 
   private async items(owner: string, number: number, options: HighLevelReadOptions = {}) {
-    const first = options.first ?? 100;
+    const first = options.first ?? 500;
     const snapshot = await this.snapshots.getSnapshot(owner, number, first);
     return {
       snapshot,
@@ -110,7 +110,7 @@ export class HighLevelReadService {
       coverage: this.snapshots.coverage(
         snapshot,
         first,
-        "High-level reads use the normalized Project snapshot path and are bounded by the requested first value (max 100).",
+        "High-level reads paginate across GitHub pages up to the requested item limit (max 500).",
       ),
     };
   }
