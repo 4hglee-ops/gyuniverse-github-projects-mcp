@@ -125,3 +125,14 @@ test("WBS field configuration preserves role, write gate and Project capability 
     assert.throws(() => new WritePolicy(config(), scoped).authorize(request), /PERMISSION_DENIED/);
   }
 });
+
+test("View configuration requires identity and both Project View/write capabilities", () => {
+  const request = { operation: "configure_project_views" as const, projectId: "PVT_allowed" };
+  assert.throws(() => new WritePolicy(config()).authorize(request), /IDENTITY_REQUIRED/);
+  assert.throws(() => new WritePolicy(config(), principal("member", "member")).authorize(request), /PERMISSION_DENIED/);
+  const admin = principal("admin", "admin");
+  assert.equal(new WritePolicy(config(), admin).authorize(request).permission, "project.view.write");
+  for (const permissions of [["project.read", "project.write"], ["project.read", "project.view.write"]] as const) {
+    assert.throws(() => new WritePolicy(config(), { ...admin, resourcePermissions: { PVT_allowed: [...permissions] } }).authorize(request), /PERMISSION_DENIED/);
+  }
+});

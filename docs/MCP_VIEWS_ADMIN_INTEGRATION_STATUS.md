@@ -56,7 +56,7 @@
 | 단계 | 상태 | 필요한 작업 |
 | --- | --- | --- |
 | 호환 기반선 | 로컬 구현·검증 완료 | Draft PR의 CI·보안 스캔 확인 후 리뷰 |
-| 공통 Project View API | 미착수 | Project #2 로직 재사용, 페이지네이션, 템플릿, planId/digest/TTL, Admin 승인·재검증·부분 실패·중복 방지·감사 |
+| 공통 Project View API | 2단계 로컬 구현·합성 검증 | 아래 로컬 결과 참조. Push/새 PR/CI/외부 검증은 미실행 |
 | 관리자 #20 안전 포팅 | 미착수 | 사용자·키·OAuth 호환, allowlist 기반 Project 선택, 팀 ACL 연결, 인증·세션·CSRF·CSP 강화 |
 | 관리자 View 화면 | 미착수 | 조회 → 템플릿 비교 → 명시적 적용 → 재조회 결과·수동 항목 표시 |
 | 보호된 Preview 실측 | 미검증 | 로그인, 키 폐기·권한 축소 즉시 반영, OAuth 클라이언트 연결, 타임아웃, View API 지원 범위 |
@@ -86,7 +86,7 @@
 
 ## 2단계 제안 승인 범위: 공통 Project View API
 
-아래는 승인 요청을 위한 제안이며 아직 구현하지 않았다. 새 `codex/project-view-api` 브랜치를 검증된 통합 브랜치에서 만들고, `integration/mcp-views-admin` 대상 별도 Draft PR로 검토한다. #25나 #20을 자동 병합하지 않는다.
+아래 25개 파일은 제안 당시의 승인 범위다. 이후 코드 수정·로컬 브랜치 생성·합성 테스트·타입 검사·빌드까지만 진행하도록 제한된 사용자 승인 질문/응답이 전달되었다. 이 제한으로 `codex/project-view-api` 브랜치에서 로컬 구현했다. Push/새 PR/배포는 현재 범위에서 제외하며 #25와 #20은 병합하지 않는다.
 
 목적은 Project #2에 고정된 기존 View 코드를 다른 허용 Project에서도 안전하게 사용하도록 하는 것이다. `list_project_views`, `preview_project_view_setup`, `apply_project_view_setup`, `update_project_view`를 MCP와 REST가 같은 Core로 호출하게 한다. 템플릿은 #2의 기존 보기와 #3의 WBS/Status/Part/내 작업/마감/Roadmap 구성을 지원 가능한 범위로 나눈다.
 
@@ -129,4 +129,109 @@
 - MCP 도구 목록과 REST/OpenAPI에 View 기능이 추가된다. Admin 기본 capability가 늘어나므로 기존에 명시적으로 축소한 capability와 팀별 교집합이 확장되지 않는지 검증한다.
 - Project #2 기존 CLI 동작을 보존하며, GitHub item/Issue/필드 옵션/Status 변경 API를 View 작업에서 호출하지 않는지 검증한다.
 - Upstash 사용 시 계획·동시 실행 상태만 별도 namespace에 기록하도록 구현한다. 기존 OAuth replay·bulk·감사 namespace와 DB 구조는 수정하지 않는다.
-- 이 단계의 승인은 위 파일의 코드 작성·합성 테스트·타입 검사·빌드·CI·별도 Draft PR 생성까지다. 실제 Project의 View 변경, DB migration 적용, 자격증명 변경, 관리자 #20 포팅, Production 활성화는 포함하지 않는다.
+- 제안 당시에는 CI·별도 Draft PR까지 포함했지만, 최신 제한 승인은 위 파일의 로컬 코드 작성·합성 테스트·타입 검사·빌드까지만 허용한다. Push/새 PR/배포, 실제 Project View·DB 변경, 로그인/실제 토큰 발급, 기존 사용자·팀 권한 변경과 관리자 #20 포팅은 포함하지 않는다.
+
+## 2단계 로컬 실행 결과
+
+위 제안에 있던 CI/별도 Draft PR 생성은 **최신 제한 승인에서 제외**되었다. 현재 작업 범위는 로컬 코드·합성 검증까지이며, 브랜치는 `codex/project-view-api`, 시작 HEAD는 `34624bd9dbb5f455004b8a7b038e3894f0e027fb`다. 커밋·Push·새 PR·CI·배포를 하지 않았다. 기존 원격 PR #25의 통과 기록을 이 코드의 CI 통과로 사용하지 않는다.
+
+### 구현한 동작
+
+- 공통 GraphQL View/필드 페이지네이션과 완전성 검증, Node ID → 정수 REST field ID 매핑을 구현했다. 기존 Project #2 foundation은 같은 조회·매핑을 재사용하며 정확한 대상·Status·Priority·기존 View 보존 경계를 유지한다.
+- `operating-v1`, `wbs-v1` 템플릿을 read → persisted preview → explicit apply → re-read/verify → audit로 연결했다. 저장 계획은 digest/15분 TTL/target/kind를 검증한다.
+- MCP 네 도구와 REST/OpenAPI가 같은 Core 서비스를 호출한다. 삭제는 노출하지 않는다. Viewer/Member, read-only OAuth scope, Project별 capability 축소, 타팀/타Project, GitHub 쓰기 권한 철회를 거부한다.
+- Project별 잠금은 같은 계획과 다른 계획의 동시 적용을 막는다. 부분 실패·응답 유실·감사 실패·최종 저장 실패를 구분하며 같은 계획을 재호출해 mutation을 반복하지 않는다.
+- 실제 사용자 grant나 scope는 변경하지 않았다. Admin의 새 capability는 코드 정의만 추가했고 기존 explicit 권한 축소와 팀 교집합은 유지했다.
+
+### 최종 검사와 미실행 범위
+
+설치된 동일 TypeScript/Node 실행 파일을 직접 사용했다. pnpm 실행기의 registry 조회나 실행 권한 확대를 요구하지 않는다. 다음 명령은 package script의 타입 검사·빌드·테스트와 같은 로컬 프로그램을 실행한다.
+
+```text
+node node_modules/typescript/bin/tsc --noEmit
+node node_modules/typescript/bin/tsc -p tsconfig.vercel.json
+node node_modules/typescript/bin/tsc
+node --test "dist/**/*.test.js"
+```
+
+- 마지막 실행 코드 수정 뒤 일반/Vercel 타입 검사와 빌드: 통과.
+- 전체 테스트: **341개 실행, 340개 통과, 1개 실패, 취소/skip/todo 0개**. 추가한 34개 테스트는 모두 통과했다. 전체 suite를 통과로 표시하지 않는다.
+- 실패: 기존 `src/http/node-server.test.ts`의 실제 loopback 소켓 테스트. `fetch`가 `connect EACCES 127.0.0.1`로 거부된다. 이 파일이나 `node-server.ts`는 수정하지 않았다.
+- 프로젝트를 import하지 않는 inline `node:http` 임시 서버 → `127.0.0.1` fetch → close 최소 재현도 동일 실행환경에서 `EACCES`를 반환했다. 따라서 환경 차단 근거는 프로젝트 코드와 독립적으로 확인했다. 방화벽/권한/네트워크 설정은 변경하지 않았다.
+- 합성 검증: 역할·Project별 두 capability 교집합/다른 Project 차단, read-only OAuth, 계획 변조/digest/만료/최종 읽기 중 만료/stale state, 동일/다른 계획 동시 적용, 중간 실패·응답 유실·감사/최종 저장 실패 후 무중복 재실행, Project #2 foundation 회귀.
+- Redis는 계약 double로만 검증했다. 실제 Redis/Lua, 실제 GitHub API, Supabase, 브라우저/OAuth 로그인, 실제 토큰 발급, 외부 CI/Gitleaks/Preview 검증은 실행하지 않았다. REST 인증 테스트의 bearer는 메모리 안의 합성 서명 fixture이며 로그인/토큰 발급 endpoint를 호출하지 않는다.
+
+### 제한과 다음 단계
+
+- `Parent issue` 열과 Roadmap 날짜 설정은 명시적인 수동/미검증 항목이다. 생성 API의 그룹·정렬은 공식 REST 계약에 맞췄으나 실제 Project에서의 시각 결과는 미검증이다. [REST View 문서](https://docs.github.com/en/rest/projects/views), [GraphQL View 문서](https://docs.github.com/en/graphql/reference/projects#updateprojectv2view).
+- 새 템플릿 생성은 조직 소유 Project만 지원한다. REST 필드가 100개로 꽉 차면 Link header를 읽지 못하는 기존 client 제약 때문에 생성 계획을 차단한다.
+- 결과가 불확실한 mutation/작업자에는 Project 잠금을 자동 해제하지 않는다. 공유 Redis 연결·소유권·감사 및 실제 상태를 확인한 별도 운영 승인 절차가 필요하다. View upstream 요청의 10초 응답 제한이 원격 요청 자체의 취소를 보장하지는 않으므로 잠금을 유지한다.
+- 로컬 memory는 단일 프로세스용이다. Preview/Production 배포에서 공유 Upstash가 없으면 새 View 계획을 차단한다. 기존 MCP 초기화/다른 기능은 View store를 지연 생성하므로 보존한다.
+- 이번 승인 범위의 안전한 로컬 작업은 완료했다. 외부 게시·CI·Preview 실측은 별도 승인 전 대기한다. 관리자 PR #20 포팅/인증 강화/팀·Project UI는 별도 파일 범위 승인 전 미착수다.
+- 사용자 브라우저는 사용하지 않았다. 기존 사용자 원본 `docs/Gyuniverse_MCP_Codex_Integration_Plan.md`는 기존 untracked 상태로 두며 이번 변경 파일에 포함하지 않는다.
+
+### 최종 파일 대조와 작업 트리
+
+`view-plan-store-factory.ts`와 해당 테스트의 마지막 수정까지 포함해 일반/Vercel 타입 검사·빌드·전체 테스트를 다시 실행했다. 최종 수치는 위의 **341 실행 / 340 통과 / 1 EACCES 실패 / skip 0**이며 그 뒤 실행 코드는 변경하지 않았다. 이후 변경은 이 결과 문서 기록뿐이다.
+
+승인 표의 절대 경로 25개를 Git의 tracked diff와 신규 파일 목록에 대조했다. **기존 수정 13개 + 신규 12개 = 25개**, 승인 범위 밖 0개, 승인 목록 중 누락 0개다. 사용자가 추가한 원본 계획서 1개는 별도 기존 untracked 파일로 제외했다. `git diff --check`도 통과했다. HEAD와 기존 통합 브랜치는 모두 `34624bd9dbb5f455004b8a7b038e3894f0e027fb`이며 2단계 변경은 미커밋 상태다.
+
+`git status --short`:
+
+```text
+ M docs/MCP_VIEWS_ADMIN_INTEGRATION_STATUS.md
+ M docs/PERMISSIONS.md
+ M src/core/identity/principal.test.ts
+ M src/core/identity/principal.ts
+ M src/core/policy/write-policy.test.ts
+ M src/core/policy/write-policy.ts
+ M src/http/openapi.test.ts
+ M src/http/openapi.ts
+ M src/http/rest-api.test.ts
+ M src/http/rest-api.ts
+ M src/mcp/build-server.ts
+ M src/project-foundation/operating-foundation.test.ts
+ M src/project-foundation/operating-foundation.ts
+?? docs/Gyuniverse_MCP_Codex_Integration_Plan.md
+?? src/core/views/
+?? src/github/project-views.test.ts
+?? src/github/project-views.ts
+?? src/mcp/project-view-tools.test.ts
+?? src/mcp/project-view-tools.ts
+?? src/project-foundation/view-templates.ts
+```
+
+`git diff --name-only` (tracked 파일만 출력):
+
+```text
+docs/MCP_VIEWS_ADMIN_INTEGRATION_STATUS.md
+docs/PERMISSIONS.md
+src/core/identity/principal.test.ts
+src/core/identity/principal.ts
+src/core/policy/write-policy.test.ts
+src/core/policy/write-policy.ts
+src/http/openapi.test.ts
+src/http/openapi.ts
+src/http/rest-api.test.ts
+src/http/rest-api.ts
+src/mcp/build-server.ts
+src/project-foundation/operating-foundation.test.ts
+src/project-foundation/operating-foundation.ts
+```
+
+신규 구현 파일 (`git ls-files --others --exclude-standard`에서 기존 사용자 원본 계획서만 제외):
+
+```text
+src/core/views/project-view-service.test.ts
+src/core/views/project-view-service.ts
+src/core/views/view-plan-store-factory.ts
+src/core/views/view-plan-store.test.ts
+src/core/views/view-plan-store.ts
+src/core/views/view-plan.test.ts
+src/core/views/view-plan.ts
+src/github/project-views.test.ts
+src/github/project-views.ts
+src/mcp/project-view-tools.test.ts
+src/mcp/project-view-tools.ts
+src/project-foundation/view-templates.ts
+```

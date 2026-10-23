@@ -2,6 +2,7 @@ import { AppConfig, assertOwnerAllowed, assertProjectAllowed, assertProjectWrite
 import { GitHubGraphQlClient } from "../github/graphql-client.js";
 import { getProject, listProjectFields } from "../github/projects.js";
 import { GitHubRestClient } from "../github/rest-client.js";
+import { readProjectViews, restFieldIds } from "../github/project-views.js";
 
 export const TARGET_PROJECT = {
   owner: "gyuniverse-hq",
@@ -126,41 +127,12 @@ interface RestProjectField {
   data_type?: string;
 }
 
-interface ProjectViewsEnvelope {
-  repositoryOwner?: {
-    projectV2?: {
-      id: string;
-      number: number;
-      title: string;
-      url?: string | null;
-      viewerCanUpdate?: boolean | null;
-      views?: { nodes?: Array<ViewNode | null> | null } | null;
-    } | null;
-  } | null;
-}
-
 interface ProjectWorkflowsEnvelope {
   repositoryOwner?: {
     projectV2?: {
       workflows?: { nodes?: Array<WorkflowNode | null> | null } | null;
     } | null;
   } | null;
-}
-
-interface NamedNode {
-  id?: string | null;
-  name?: string | null;
-}
-
-interface ViewNode {
-  id?: string | null;
-  number?: number | null;
-  name?: string | null;
-  layout?: string | null;
-  filter?: string | null;
-  fields?: { nodes?: Array<NamedNode | null> | null } | null;
-  groupByFields?: { nodes?: Array<NamedNode | null> | null } | null;
-  verticalGroupByFields?: { nodes?: Array<NamedNode | null> | null } | null;
 }
 
 interface WorkflowNode {
@@ -182,10 +154,6 @@ function string(value: unknown): string | null {
 
 function number(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function namedNodes(connection: { nodes?: Array<NamedNode | null> | null } | null | undefined): string[] {
-  return (connection?.nodes ?? []).flatMap((node) => node?.name ? [node.name] : []);
 }
 
 function normalizeIteration(raw: UnknownRecord): FoundationField["iteration"] {
@@ -223,8 +191,7 @@ function normalizeIteration(raw: UnknownRecord): FoundationField["iteration"] {
 }
 
 function normalizeFields(rawFields: unknown[], restFields: RestProjectField[]): FoundationField[] {
-  const restByNodeId = new Map(restFields.flatMap((field) =>
-    typeof field.node_id === "string" && typeof field.id === "number" ? [[field.node_id, field.id] as const] : []));
+  const restByNodeId = restFieldIds(restFields);
 
   return rawFields.flatMap((raw) => {
     const field = object(raw);
@@ -255,72 +222,7 @@ function exactOptions(actual: string[], expected: readonly string[]): boolean {
   return actual.length === expected.length && expected.every((name) => actual.includes(name));
 }
 
-const VIEW_FIELD_NODE = `
-  nodes {
-    __typename
-    ... on ProjectV2Field { id name }
-    ... on ProjectV2SingleSelectField { id name }
-    ... on ProjectV2IterationField { id name }
-    ... on ProjectV2MultiSelectField { id name }
-  }
-`;
-
-async function readViews(
-  client: GitHubGraphQlClient,
-  owner: string,
-  projectNumber: number,
-): Promise<{ project: NonNullable<NonNullable<ProjectViewsEnvelope["repositoryOwner"]>["projectV2"]>; views: FoundationView[] }> {
-  const data = await client.request<ProjectViewsEnvelope>(
-    `query($login: String!, $number: Int!) {
-      repositoryOwner(login: $login) {
-        ... on Organization {
-          projectV2(number: $number) {
-            id number title url viewerCanUpdate
-            views(first: 100) {
-              nodes {
-                id number name layout filter
-                fields(first: 30) { ${VIEW_FIELD_NODE} }
-                groupByFields(first: 5) { ${VIEW_FIELD_NODE} }
-                verticalGroupByFields(first: 5) { ${VIEW_FIELD_NODE} }
-              }
-            }
-          }
-        }
-        ... on User {
-          projectV2(number: $number) {
-            id number title url viewerCanUpdate
-            views(first: 100) {
-              nodes {
-                id number name layout filter
-                fields(first: 30) { ${VIEW_FIELD_NODE} }
-                groupByFields(first: 5) { ${VIEW_FIELD_NODE} }
-                verticalGroupByFields(first: 5) { ${VIEW_FIELD_NODE} }
-              }
-            }
-          }
-        }
-      }
-    }`,
-    { login: owner, number: projectNumber },
-  );
-  const project = data.repositoryOwner?.projectV2;
-  if (!project) throw new Error(`GitHub Project #${projectNumber} was not found.`);
-
-  const views = (project.views?.nodes ?? []).flatMap((view) =>
-    view?.id && typeof view.number === "number" && view.name && view.layout
-      ? [{
-          id: view.id,
-          number: view.number,
-          name: view.name,
-          layout: view.layout,
-          filter: view.filter ?? null,
-          visibleFields: namedNodes(view.fields),
-          groupByFields: namedNodes(view.groupByFields),
-          verticalGroupByFields: namedNodes(view.verticalGroupByFields),
-        }]
-      : []);
-  return { project, views };
-}
+const readViews = readProjectViews;
 
 async function readWorkflows(
   client: GitHubGraphQlClient,
