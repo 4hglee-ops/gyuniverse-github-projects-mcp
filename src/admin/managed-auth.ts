@@ -14,7 +14,8 @@ export const adminAuditSchema = z.object({ id: z.uuid(), actorId: z.string().min
 export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type ManagedKey = z.infer<typeof managedKeySchema>;
 export type AdminAudit = z.infer<typeof adminAuditSchema>;
-const receiptSchema = z.object({ actorId: z.string().min(1).max(256), digest: z.string().regex(/^[0-9a-f]{64}$/),
+const authorizationTargetSchema = z.object({ projectIds: ids, role }).strict();
+const receiptSchema = z.object({ authorizationTargets: z.array(authorizationTargetSchema).min(1).max(3), actorId: z.string().min(1).max(256), digest: z.string().regex(/^[0-9a-f]{64}$/),
   result: z.object({ operationId: z.uuid(), target: z.string().min(1).max(256), version: z.number().int().positive() }).strict() }).strict();
 type Receipt = z.infer<typeof receiptSchema>;
 export interface ManagementState { users: ManagedUser[]; credentials: ManagedKey[]; audit: AdminAudit[]; receipts: Record<string, Receipt> }
@@ -92,26 +93,40 @@ export async function handleAdminManagement(path: string, method: string, body: 
     state(draft);
     const policy = await runtime.policy(await refresh()), operator = await refresh();
     let target: ManagedUser | ManagedKey | undefined, operation: AdminOperation;
+    // Capture complete pre-mutation scopes/roles, including the parent and requested new scope.
+    // Each snapshot stays separate so a 30-Project old/new scope need not be truncated into a union.
+    const authorizationTargets: Array<z.infer<typeof authorizationTargetSchema>> = [];
+    const authorizeTarget = (record: { projectIds: string[]; role: ManagedUser["role"] }) => {
+      authorize(policy, operator, operation, record);
+      authorizationTargets.push({ projectIds: [...record.projectIds], role: record.role });
+    };
     if (path === "users") {
       operation = "admin.users.write"; const { operationId: _operationId, ...metadata } = create.parse(input);
       target = managedUserSchema.parse({ ...metadata, subject: "user:managed:" + randomUUID(), enabled: true, version: 1 });
-      authorize(policy, operator, operation, target);
+      authorizeTarget(target);
     } else if (path === "credentials/revoke") {
       operation = "admin.credentials.revoke"; const arg = revoke.parse(input);
       target = draft.credentials.find((key) => key.id === arg.id); if (!target) return denied();
       const user = draft.users.find((u) => u.subject === target!.subject); if (!user) return denied();
-      authorize(policy, operator, operation, target); authorize(policy, operator, operation, user);
+      authorizeTarget(target); authorizeTarget(user);
     } else {
       const arg = path === "users/update" ? update.parse(input) : issue.parse(input);
       operation = path === "users/update" ? "admin.users.write" : "admin.credentials.issue";
       target = draft.users.find((u) => u.subject === arg.subject); if (!target) return denied();
-      authorize(policy, operator, operation, target);
-      if (path === "users/update") authorize(policy, operator, operation, update.parse(input));
+      authorizeTarget(target);
+      if (path === "users/update") authorizeTarget(update.parse(input));
       if (path === "credentials" && !(target as ManagedUser).enabled) return denied();
     }
     const existing = draft.receipts[input.operationId];
     if (existing) {
       if (existing.actorId !== operator.proof.subject || existing.digest !== digest) throw new Error("ADMIN_OPERATION_CONFLICT: Operation reference is already used.");
+      // Replays need current authority for the original operation, not only the narrowed current parent.
+      for (const original of existing.authorizationTargets) authorize(policy, operator, operation, original);
+      if (path === "credentials") {
+        const issued = draft.credentials.find((key) => key.id === existing.result.target);
+        if (!issued || issued.revoked || issued.subject !== target.subject) return denied();
+        authorize(policy, operator, operation, issued);
+      }
       if (path === "users") {
         const current = draft.users.find((u) => u.subject === existing.result.target); if (!current) return denied();
         authorize(policy, operator, operation, current);
@@ -136,7 +151,7 @@ export async function handleAdminManagement(path: string, method: string, body: 
     } else { const key = target as ManagedKey; key.revoked = true; key.version++; targetId = key.id; }
     const result = { operationId: input.operationId, target: targetId, version: target.version };
     draft.audit.push({ id: randomUUID(), actorId: operator.proof.subject, operation, target: targetId, projectIds: [...target.projectIds], at: Math.floor(Date.now() / 1000) });
-    draft.receipts[input.operationId] = { actorId: operator.proof.subject, digest, result };
+    draft.receipts[input.operationId] = { actorId: operator.proof.subject, digest, result, authorizationTargets };
     return { ...result, replayed: false, ...(secret ? { secret, syntheticOnly: true } : {}) };
   });
 }
