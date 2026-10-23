@@ -7,7 +7,8 @@ import { readProjectViews, readViewFields, readRestViewFieldIds, createProjectVi
 const end = { hasNextPage: false, endCursor: null };
 const conn = (nodes: unknown[] = []) => ({ nodes, pageInfo: end });
 const node = (id: string) => ({ id, number: 1, name: "Existing", layout: "TABLE_LAYOUT", filter: null,
-  fields: conn([{ id: "F", name: "Title" }]), groupByFields: conn(), verticalGroupByFields: conn(), sortByFields: conn() });
+  configuration: { visibleFields: conn([{ id: "F", name: "Title" }]) },
+  groupByFields: conn(), verticalGroupByFields: conn(), sortByFields: conn() });
 class QueryClient extends GitHubGraphQlClient {
   calls: Array<{ query: string; vars: Record<string, unknown> }> = [];
   constructor(private readonly reply: (vars: Record<string, unknown>, query: string) => unknown) { super("synthetic-unused"); }
@@ -29,8 +30,36 @@ test("View reads reject duplicates, cursor cycles and truncated nested fields", 
   await assert.rejects(() => readProjectViews(duplicate, "fixture-org", 3), /VIEW_RESPONSE_INCOMPLETE/);
   const cycle = new QueryClient((v) => envelope([node(v.after ? "V2" : "V1")], { hasNextPage: true, endCursor: "next" }));
   await assert.rejects(() => readProjectViews(cycle, "fixture-org", 3), /VIEW_CURSOR_INVALID/);
-  const truncated = { ...node("V"), fields: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "more" } } };
+  const truncated = { ...node("V"), configuration: { visibleFields: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "more" } } } };
   await assert.rejects(() => readProjectViews(new QueryClient(() => envelope([truncated])), "fixture-org", 3), /VIEW_RESPONSE_INCOMPLETE/);
+});
+test("View reads preserve configured column order and explicit empty columns without falling back to fields", async () => {
+  const projectOrder = [{ id: "F_TITLE", name: "Title" }, { id: "F_STATUS", name: "Status" }];
+  for (const configured of [[...projectOrder].reverse(), []]) {
+    const client = new QueryClient(() => envelope([{ ...node("V"), fields: conn(projectOrder),
+      configuration: { visibleFields: conn(configured) } }]));
+    const result = await readProjectViews(client, "fixture-org", 3);
+    assert.deepEqual(result.views[0]!.visibleFieldIds, configured.map((f) => f.id));
+    assert.deepEqual(result.views[0]!.visibleFields, configured.map((f) => f.name));
+    assert.match(client.calls[0]!.query, /configuration\s*\{\s*visibleFields\(first: 100\)/);
+    assert.doesNotMatch(client.calls[0]!.query, /\bfields\(first:/);
+  }
+});
+test("Missing or malformed configured columns fail closed even when legacy fields are available", async () => {
+  for (const configuration of [undefined, null, {}, { visibleFields: null },
+    { visibleFields: conn([null]) }, { visibleFields: { nodes: [] } },
+    { visibleFields: conn([{ name: "Missing ID" }]) }]) {
+    const client = new QueryClient(() => envelope([{ ...node("V"),
+      fields: conn([{ id: "F", name: "Title" }]), configuration }]));
+    await assert.rejects(() => readProjectViews(client, "fixture-org", 3), /VIEW_RESPONSE_INVALID/);
+  }
+});
+test("Duplicate or oversized configured column responses are never treated as complete", async () => {
+  for (const columns of [[{ id: "F", name: "Title" }, { id: "F", name: "Title" }],
+    Array.from({ length: 101 }, (_, i) => ({ id: "F" + i, name: "Field " + i }))]) {
+    const client = new QueryClient(() => envelope([{ ...node("V"), configuration: { visibleFields: conn(columns) } }]));
+    await assert.rejects(() => readProjectViews(client, "fixture-org", 3), /VIEW_RESPONSE_INCOMPLETE/);
+  }
 });
 test("Field reads paginate and REST IDs are integers mapped by node ID, never field name", async () => {
   const client = new QueryClient((v) => ({ repositoryOwner: { projectV2: { fields: {

@@ -98,7 +98,8 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
       }
       return { repositoryOwner: { __typename: "Organization", projectV2: { id: variables.number === 2 ? "OTHER" : "PVT", number: variables.number,
         title: "Fixture", url: null, viewerCanUpdate: true, fields: conn([{ id: "F", name: "Title", dataType: "TEXT" }]),
-        views: conn([{ id: "V", number: 1, name, layout: "TABLE_LAYOUT", filter: null, fields: conn([{ id: "F", name: "Title" }]), groupByFields: conn(), verticalGroupByFields: conn(), sortByFields: conn() }]),
+        views: conn([{ id: "V", number: 1, name, layout: "TABLE_LAYOUT", filter: null,
+          configuration: { visibleFields: conn([{ id: "F", name: "Title" }]) }, groupByFields: conn(), verticalGroupByFields: conn(), sortByFields: conn() }]),
       } } } as T;
     }
   }

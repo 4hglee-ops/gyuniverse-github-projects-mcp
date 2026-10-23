@@ -14,7 +14,8 @@ async function session(t: TestContext, role: "admin" | "viewer" | "member", writ
       if (query.includes("mutation")) { mutations++; name = (vars.input as { name: string }).name; return { updateProjectV2View: { projectV2View: { id: "V" } } } as T; }
       return { repositoryOwner: { __typename: "Organization", projectV2: { id: "PVT", number: 3, title: "Fixture", url: null, viewerCanUpdate: true,
         fields: conn([{ id: "F", name: "Title", dataType: "TEXT" }]),
-        views: conn([{ id: "V", number: 1, name, layout: "TABLE_LAYOUT", filter: null, fields: conn([{ id: "F", name: "Title" }]), groupByFields: conn(), verticalGroupByFields: conn(), sortByFields: conn() }]),
+        views: conn([{ id: "V", number: 1, name, layout: "TABLE_LAYOUT", filter: null,
+          configuration: { visibleFields: conn([{ id: "F", name: "Title" }]) }, groupByFields: conn(), verticalGroupByFields: conn(), sortByFields: conn() }]),
       } } } as T;
     }
   }

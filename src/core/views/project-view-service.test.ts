@@ -32,7 +32,10 @@ function setup(options: { principal?: AuthenticatedPrincipal; store?: MemoryView
   const config = { githubToken: "synthetic-unused", allowedOwners: ["fixture-org"], allowedProjectIds: ["PVT", "OTHER"], writeEnabled: options.writeEnabled ?? true };
   const principal = options.principal ?? admin();
   const field = (id: string) => fields.find((f) => f.id === id)!;
-  const node = (v: ProjectView) => ({ ...v, fields: connection(v.visibleFieldIds.map((id) => ({ id, name: field(id).name }))),
+  const node = (v: ProjectView) => ({ ...v,
+    // Legacy fields are in Project order; configured columns may have a different order.
+    fields: connection(fields.filter((f) => v.visibleFieldIds.includes(f.id)).map(({ id, name }) => ({ id, name }))),
+    configuration: { visibleFields: connection(v.visibleFieldIds.map((id) => ({ id, name: field(id).name }))) },
     groupByFields: connection(v.groupByFields.map((name) => fields.find((f) => f.name === name))),
     verticalGroupByFields: connection(v.verticalGroupByFields.map((name) => fields.find((f) => f.name === name))),
     sortByFields: connection(v.sortBy.map((s) => ({ field: fields.find((f) => f.name === s.field), direction: s.direction.toUpperCase() }))),
@@ -90,6 +93,52 @@ function setup(options: { principal?: AuthenticatedPrincipal; store?: MemoryView
   };
 }
 const preview = (s: ReturnType<typeof setup>) => s.service.preview({ owner: "fixture-org", number: 3, template: "wbs-v1" });
+
+function seedColumns(s: ReturnType<typeof setup>) {
+  s.views.push({ id: "V1", number: 1, name: "Existing", layout: "TABLE_LAYOUT", filter: null,
+    visibleFieldIds: ["F0", "F1"], visibleFields: ["Title", "Status"], groupByFields: [], verticalGroupByFields: [], sortBy: [] });
+}
+test("Configured column reorder verifies successfully, replays once and releases the Project lock", async () => {
+  const s = setup(); seedColumns(s);
+  const plan = await s.service.preview({ owner: "fixture-org", number: 3,
+    update: { viewId: "V1", changes: { visibleFieldIds: ["F1", "F0"] } } });
+  const result = await s.service.apply(reference(plan), "update");
+  assert.equal(result.state, "completed");
+  assert.equal(result.results[0]!.verified, true);
+  assert.deepEqual((await s.service.list("fixture-org", 3)).views[0]!.visibleFieldIds, ["F1", "F0"]);
+  await s.service.apply(reference(plan), "update");
+  assert.equal(s.writes, 1);
+  const next = await s.service.preview({ owner: "fixture-org", number: 3,
+    update: { viewId: "V1", changes: { name: "Renamed" } } });
+  assert.equal((await s.service.apply(reference(next), "update")).state, "completed");
+  assert.equal(s.writes, 2);
+});
+test("Configured column reorder after preview makes the plan stale with zero mutations", async () => {
+  const s = setup(); seedColumns(s);
+  const plan = await s.service.preview({ owner: "fixture-org", number: 3,
+    update: { viewId: "V1", changes: { name: "Renamed" } } });
+  s.views[0]!.visibleFieldIds.reverse();
+  await assert.rejects(() => s.service.apply(reference(plan), "update"), /VIEW_PLAN_STALE/);
+  assert.equal(s.writes, 0);
+  assert.equal(s.views[0]!.name, "Existing");
+});
+test("Incorrect configured order after mutation fails verification and retains the uncertain Project lock", async () => {
+  const s = setup(); seedColumns(s);
+  const plan = await s.service.preview({ owner: "fixture-org", number: 3,
+    update: { viewId: "V1", changes: { visibleFieldIds: ["F1", "F0"] } } });
+  s.onRead((query) => {
+    if (s.writes === 1 && query.includes("query ProjectViews")) s.views[0]!.visibleFieldIds = ["F0", "F1"];
+  });
+  const result = await s.service.apply(reference(plan), "update");
+  assert.equal(result.state, "partial");
+  assert.equal(result.errorCode, "VIEW_VERIFICATION_FAILED");
+  assert.equal(result.results[0]!.changed, null);
+  await s.service.apply(reference(plan), "update");
+  const next = await s.service.preview({ owner: "fixture-org", number: 3,
+    update: { viewId: "V1", changes: { name: "Renamed" } } });
+  await assert.rejects(() => s.service.apply(reference(next), "update"), /VIEW_PLAN_IN_PROGRESS/);
+  assert.equal(s.writes, 1);
+});
 
 test("WBS preview performs zero mutations, includes Backlog Board and marks Roadmap manual work", async () => {
   const s = setup(), plan = await preview(s);

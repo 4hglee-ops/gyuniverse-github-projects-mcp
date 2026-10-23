@@ -12,7 +12,8 @@ const fieldNode = named.extend({ dataType: z.string(), options: z.array(z.object
 const viewNode = z.object({
   id: z.string().min(1), number: z.number().int().positive(), name: z.string(),
   layout: z.enum(["TABLE_LAYOUT", "BOARD_LAYOUT", "ROADMAP_LAYOUT"]), filter: z.string().nullable(),
-  fields: connection(named), groupByFields: connection(named), verticalGroupByFields: connection(named),
+  configuration: z.object({ visibleFields: connection(named) }),
+  groupByFields: connection(named), verticalGroupByFields: connection(named),
   sortByFields: connection(z.object({ field: named, direction: z.enum(["ASC", "DESC"]) })),
 });
 export interface ProjectView {
@@ -39,8 +40,9 @@ export type ViewChanges = z.infer<typeof viewChangesSchema>;
 const fieldFragment = `... on ProjectV2Field { id name } ... on ProjectV2SingleSelectField { id name }
   ... on ProjectV2IterationField { id name } ... on ProjectV2MultiSelectField { id name }`;
 const namedConnection = `nodes { ${fieldFragment} } pageInfo { hasNextPage endCursor }`;
+// Only configuration.visibleFields guarantees configured column order. Require it; never fall back to fields.
 const viewSelection = `id number name layout filter
-  fields(first: 100) { ${namedConnection} }
+  configuration { visibleFields(first: 100) { ${namedConnection} } }
   groupByFields(first: 100) { ${namedConnection} }
   verticalGroupByFields(first: 100) { ${namedConnection} }
   sortByFields(first: 100) { nodes { direction field { ${fieldFragment} } } pageInfo { hasNextPage endCursor } }`;
@@ -79,12 +81,14 @@ export async function readProjectViews(client: GitHubGraphQlClient, owner: strin
     if (p.number !== number || (project && project.id !== p.id) || p.views.nodes.length > 100) throw new Error("VIEW_RESPONSE_INVALID: Project identity or page changed.");
     project = { id: p.id, number: p.number, title: p.title, url: p.url, viewerCanUpdate: p.viewerCanUpdate, ownerType };
     for (const v of p.views.nodes) {
-      if (ids.has(v.id) || [v.fields, v.groupByFields, v.verticalGroupByFields, v.sortByFields].some((c) => c.pageInfo.hasNextPage)) {
+      const columns = v.configuration.visibleFields;
+      if (ids.has(v.id) || [columns, v.groupByFields, v.verticalGroupByFields, v.sortByFields].some((c) => c.pageInfo.hasNextPage)
+        || columns.nodes.length > 100 || new Set(columns.nodes.map((f) => f.id)).size !== columns.nodes.length) {
         throw new Error("VIEW_RESPONSE_INCOMPLETE: Duplicate View or truncated configuration.");
       }
       ids.add(v.id);
       views.push({ id: v.id, number: v.number, name: v.name, layout: v.layout, filter: v.filter,
-        visibleFields: v.fields.nodes.map((f) => f.name), visibleFieldIds: v.fields.nodes.map((f) => f.id),
+        visibleFields: columns.nodes.map((f) => f.name), visibleFieldIds: columns.nodes.map((f) => f.id),
         groupByFields: v.groupByFields.nodes.map((f) => f.name), verticalGroupByFields: v.verticalGroupByFields.nodes.map((f) => f.name),
         sortBy: v.sortByFields.nodes.map((s) => ({ field: s.field.name, direction: s.direction === "ASC" ? "asc" : "desc" })),
       });

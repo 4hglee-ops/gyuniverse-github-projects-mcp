@@ -132,7 +132,8 @@ test("Project #2 foundation reuses common View reads/REST mapping and preserves 
       const input = body as { name: string; layout: string; filter?: string; visible_fields: number[]; group_by?: number[]; vertical_group_by?: number[] };
       const named = (ids: number[] = []) => ids.map((id) => initial.fields.find((f) => f.restId === id)).map((f) => ({ id: f!.id, name: f!.name }));
       views.push({ id: "V" + (views.length + 1), number: views.length + 1, name: input.name, layout: input.layout.toUpperCase() + "_LAYOUT", filter: input.filter ?? null,
-        fields: connection(named(input.visible_fields)), groupByFields: connection(named(input.group_by)), verticalGroupByFields: connection(named(input.vertical_group_by)), sortByFields: connection() });
+        configuration: { visibleFields: connection(named(input.visible_fields)) },
+        groupByFields: connection(named(input.group_by)), verticalGroupByFields: connection(named(input.vertical_group_by)), sortByFields: connection() });
       return {} as T;
     }
   }
