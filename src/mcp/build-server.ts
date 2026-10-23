@@ -23,6 +23,7 @@ import { registerWorkflowWriteTools } from "./workflow-write-tools.js";
 import { registerRelationshipTools } from "./relationship-tools.js";
 import { registerRelationshipWriteTools } from "./relationship-write-tools.js";
 import { registerBulkPlanTools } from "./bulk-plan-tools.js";
+import { WbsFieldSetupService } from "../project-foundation/wbs-field-setup.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
@@ -64,6 +65,19 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   registerCheckpointTools({ server, changes: changeService, json });
   registerHighLevelReadTools({ server, reads: highLevelReadService, changes: changeService, principal, json });
   registerWorkflowWriteTools({ server, client, writePolicy, auditService, resolveProject, workItems: workItemService, projectIdOf, json });
+  const wbsFields = new WbsFieldSetupService({ client, projects: projectService, writePolicy, principal });
+  server.registerTool("preview_kbeauty_wbs_fields", {
+    description: "Read-only preview of seven WBS Project fields for gyuniverse-hq Project #3; no changes to other Projects.",
+    inputSchema: z.object({ owner: z.literal("gyuniverse-hq"), number: z.literal(3) }),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async ({ owner, number }) => json(await wbsFields.preview(owner, number)));
+
+  server.registerTool("apply_kbeauty_wbs_fields", {
+    description: "Admin-only guarded creation of missing WBS fields in Project #3. Non-destructive and verifies each field; preview first.",
+    inputSchema: z.object({ owner: z.literal("gyuniverse-hq"), number: z.literal(3) }),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async ({ owner, number }) => json(await wbsFields.apply(owner, number)));
+
   registerBulkPlanTools({
     server,
     bulk: governance.bulk,
@@ -117,7 +131,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
     "list_github_project_items",
     {
       description: "List issues, pull requests, draft issues, assignees, and field values in an authorized GitHub Project v2.",
-      inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(100).default(50) }),
+      inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(500).default(500) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ owner, number, first }) => json(await githubProjects.listItems(owner, number, first)),
@@ -147,7 +161,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
     "get_github_project_snapshot",
     {
       description: "Return a normalized snapshot of an authorized Project for AI team-state analysis.",
-      inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(100).default(100) }),
+      inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(500).default(500) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ owner, number, first }) => json(await snapshotService.getSnapshot(owner, number, first)),
@@ -158,7 +172,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
     {
       description: "Analyze an authorized GitHub Project snapshot for missing Status and missing assignee gaps while preserving item evidence.",
       inputSchema: z.object({
-        owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(100).default(100),
+        owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(500).default(500),
         statusFieldName: z.string().min(1).default("Status"), assigneeFieldNames: z.array(z.string().min(1)).max(10).default(["Assignees", "Assignee"]),
         completedStatusNames: z.array(z.string().min(1)).max(20).default(["Done", "Completed", "Closed"]), includeArchived: z.boolean().default(false),
         includeCompletedForAssignee: z.boolean().default(false),
@@ -175,7 +189,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
     {
       description: "Compare Pull Request merge state with Project Status and surface evidence-backed workflow mismatches for an authorized Project.",
       inputSchema: z.object({
-        owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(100).default(100),
+        owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(500).default(500),
         statusFieldName: z.string().min(1).default("Status"), completedStatusNames: z.array(z.string().min(1)).max(20).default(["Done", "Completed", "Closed"]),
         includeArchived: z.boolean().default(false), reportDoneButNotMerged: z.boolean().default(true),
       }),
@@ -190,7 +204,7 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
     "get_github_project_brief_context",
     {
       description: "Return normalized authorized Project state plus a contract for producing a team brief without treating planned work as completed work.",
-      inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(100).default(100) }),
+      inputSchema: z.object({ owner: z.string().min(1), number: z.number().int().min(1), first: z.number().int().min(1).max(500).default(500) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     async ({ owner, number, first }) => json(await workflowService.getBriefContext(owner, number, first)),

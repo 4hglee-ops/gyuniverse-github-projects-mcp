@@ -55,6 +55,20 @@ Identity Project Membership
 
 Identity의 `githubLogin`은 actor identity로만 사용하며 Project owner를 대신하지 않습니다.
 
+### 신규 팀원 추가: 기존 Secret 유지
+
+기존 `MCP_OAUTH_IDENTITIES_JSON`이 Vercel Sensitive/Secret으로 저장되어 다시 읽을 수 없다면,
+별도의 `MCP_OAUTH_ADDITIONAL_IDENTITIES_JSON` 환경변수에 새 OAuth identity 배열을 등록할 수 있습니다.
+서버는 두 배열을 합쳐 검사하며, 기존 Secret을 재입력하거나 덮어쓰지 않습니다.
+
+- 새 팀원은 고유한 `subject`, `accessCode`, `githubLogin`, `role`, `projectIds`를 가집니다.
+- 두 배열 사이에서 `subject` 또는 `accessCode`가 중복되면 인증 설정이 거부됩니다.
+- 기존 identity의 Project membership은 자동으로 확장되지 않습니다. 기존 사용자를 새 Project에 추가하려면 새로운 identity를 별도로 등록하거나 원본 설정을 수정해야 합니다.
+- 동일한 GitHub login에 기존 identity와 새 identity가 함께 존재할 수 있으나, OAuth 연결 시 어떤 개인 접근 코드를 사용했는지에 따라 Project 권한이 결정됩니다.
+- 신규 접근 코드는 반드시 비밀 저장소에서 관리하며 GitHub 저장소/Issue/PR에 넣지 않습니다.
+
+`MCP_OAUTH_ADDITIONAL_IDENTITIES_JSON`을 비워 두면 기존 동작과 동일합니다.
+
 ## 5. Viewer
 
 Viewer는 다음 용도에 적합합니다.

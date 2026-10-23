@@ -108,3 +108,20 @@ test("bulk operations use distinct capability checks while keeping Project scope
   assert.throws(() => approvalOnly.authorize({ operation: "apply_bulk_plan", projectId: "PVT_allowed" }), /PERMISSION_DENIED/);
   assert.throws(() => approvalOnly.authorize({ operation: "approve_bulk_plan", projectId: "PVT_other" }), /Project is not allowed/);
 });
+
+test("WBS field configuration preserves role, write gate and Project capability checks", () => {
+  const request = { operation: "configure_project_fields" as const, projectId: "PVT_allowed" };
+  const admin = principal("admin-1", "admin");
+  assert.equal(new WritePolicy(config(), admin).authorize(request).permission, "item.update_field");
+  for (const role of ["viewer", "member"] as const) {
+    assert.throws(() => new WritePolicy(config(), principal(role, role)).authorize(request), /PERMISSION_DENIED/);
+  }
+  assert.throws(() => new WritePolicy(config({ writeEnabled: false }), admin).authorize(request), /write tools are disabled/);
+  assert.throws(() => new WritePolicy(config({ allowedProjectIds: ["PVT_other"] }), admin).authorize(request), /Project is not allowed/);
+
+  // A global admin must not bypass the M12 per-Project capability ceiling.
+  for (const permissions of [["project.read", "project.write"], ["project.read", "item.update_field"]] as const) {
+    const scoped = { ...admin, resourcePermissions: { PVT_allowed: [...permissions] } };
+    assert.throws(() => new WritePolicy(config(), scoped).authorize(request), /PERMISSION_DENIED/);
+  }
+});

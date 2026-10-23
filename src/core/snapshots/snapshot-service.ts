@@ -4,6 +4,9 @@ export interface ProjectSnapshot extends NormalizedProjectSnapshotForGaps {
   project?: unknown;
   fields?: unknown[];
   itemCount?: number;
+  hasMoreItems?: boolean;
+  pagesFetched?: number;
+  requestedLimit?: number;
 }
 
 export interface ProjectSnapshotReader {
@@ -13,7 +16,7 @@ export interface ProjectSnapshotReader {
 export interface SnapshotCoverage {
   requestedItems: number;
   returnedItems: number;
-  completeBeyondFirstPage: false;
+  completeBeyondFirstPage: boolean;
   note: string;
 }
 
@@ -29,8 +32,10 @@ export class SnapshotService {
     return {
       requestedItems,
       returnedItems: snapshot.itemCount ?? snapshot.items?.length ?? 0,
-      completeBeyondFirstPage: false,
-      note,
+      completeBeyondFirstPage: snapshot.hasMoreItems === false,
+      note: snapshot.hasMoreItems === true
+        ? "TRUNCATED: There are more items than the requested limit. " + note
+        : snapshot.hasMoreItems === false ? "Complete result. " + note : "Coverage unknown. " + note,
     };
   }
 }

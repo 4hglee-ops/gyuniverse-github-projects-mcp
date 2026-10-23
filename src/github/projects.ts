@@ -136,24 +136,88 @@ const ITEM_NODE = `
   }
 `;
 
+export const MAX_PROJECT_ITEMS = 500;
+
+export interface ProjectItemsResult {
+  items: unknown[];
+  hasMoreItems: boolean;
+  pagesFetched: number;
+  requestedLimit: number;
+}
+
+/**
+ * Collect up to a caller-defined total of 500 Project items using GitHub's
+ * per-request cap of 100. Distinguishes a complete result from a truncated one.
+ * Fail closed on malformed cursors, non-advancing pages, and duplicate items.
+ */
+export async function listProjectItemsWithCoverage(
+  client: GitHubGraphQlClient,
+  owner: string,
+  number: number,
+  limit = 50,
+): Promise<ProjectItemsResult> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PROJECT_ITEMS) {
+    throw new Error("PROJECT_ITEMS_LIMIT_INVALID: limit must be between 1 and 500.");
+  }
+
+  const items: unknown[] = [];
+  const seenIds = new Set<string>();
+  let cursor: string | null = null;
+  let pagesFetched = 0;
+  let hasMoreItems = false;
+
+  while (items.length < limit) {
+    const pageSize = Math.min(100, limit - items.length);
+    const data: OwnerEnvelope = await client.request<OwnerEnvelope>(
+      `query($login: String!, $number: Int!, $pageSize: Int!, $after: String) {
+        repositoryOwner(login: $login) {
+          ... on Organization { projectV2(number: $number) { items(first: $pageSize, after: $after) { pageInfo { hasNextPage endCursor } nodes { ${ITEM_NODE} } } } }
+          ... on User { projectV2(number: $number) { items(first: $pageSize, after: $after) { pageInfo { hasNextPage endCursor } nodes { ${ITEM_NODE} } } } }
+        }
+      }`,
+      { login: owner, number, pageSize, after: cursor },
+    );
+    const project = ownerFrom(data).projectV2 as {
+      items?: {
+        nodes?: unknown[] | null;
+        pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
+      } | null;
+    } | null;
+    if (!project) throw new Error(`GitHub Project #${number} was not found.`);
+    const page = project.items;
+    if (!page) throw new Error("PROJECT_ITEMS_MISSING: GraphQL returned no items connection.");
+    pagesFetched += 1;
+
+    const nodes = page.nodes ?? [];
+    if (nodes.length > pageSize) throw new Error("PROJECT_ITEMS_OVERSIZED_PAGE: Unexpected page size.");
+    for (const node of nodes) {
+      if (!node || typeof node !== "object" || typeof (node as { id?: unknown }).id !== "string") {
+        throw new Error("PROJECT_ITEMS_INVALID_NODE: Item ID must be present.");
+      }
+      const id = (node as { id: string }).id;
+      if (seenIds.has(id)) throw new Error("PROJECT_ITEMS_DUPLICATE: Pagination returned a duplicate item.");
+      seenIds.add(id);
+      items.push(node);
+    }
+    hasMoreItems = page.pageInfo?.hasNextPage === true;
+    if (!hasMoreItems) break;
+    const nextCursor = page.pageInfo?.endCursor;
+    if (typeof nextCursor !== "string" || !nextCursor || nextCursor === cursor || nodes.length === 0) {
+      throw new Error("PROJECT_ITEMS_CURSOR_INVALID: Cursor did not advance.");
+    }
+    cursor = nextCursor;
+  }
+
+  return { items, hasMoreItems, pagesFetched, requestedLimit: limit };
+}
+
 export async function listProjectItems(
   client: GitHubGraphQlClient,
   owner: string,
   number: number,
   first = 50,
 ): Promise<unknown[]> {
-  const data = await client.request<OwnerEnvelope>(
-    `query($login: String!, $number: Int!, $first: Int!) {
-      repositoryOwner(login: $login) {
-        ... on Organization { projectV2(number: $number) { items(first: $first) { nodes { ${ITEM_NODE} } } } }
-        ... on User { projectV2(number: $number) { items(first: $first) { nodes { ${ITEM_NODE} } } } }
-      }
-    }`,
-    { login: owner, number, first },
-  );
-  const project = ownerFrom(data).projectV2 as { items?: { nodes?: unknown[] | null } } | null;
-  if (!project) throw new Error(`GitHub Project #${number} was not found.`);
-  return project.items?.nodes ?? [];
+  return (await listProjectItemsWithCoverage(client, owner, number, first)).items;
 }
 
 interface FieldValueNode {
@@ -213,13 +277,13 @@ export async function getProjectSnapshot(
   number: number,
   first = 100,
 ): Promise<unknown> {
-  const [project, fields, rawItems] = await Promise.all([
+  const [project, fields, paginated] = await Promise.all([
     getProject(client, owner, number),
     listProjectFields(client, owner, number),
-    listProjectItems(client, owner, number, first),
+    listProjectItemsWithCoverage(client, owner, number, first),
   ]);
 
-  const items = (rawItems as ProjectItem[]).map((item) => {
+  const items = (paginated.items as ProjectItem[]).map((item) => {
     const fieldValues: Record<string, unknown> = {};
     for (const value of item.fieldValues?.nodes ?? []) {
       const fieldName = value.field?.name;
@@ -249,6 +313,9 @@ export async function getProjectSnapshot(
     project,
     fields,
     itemCount: items.length,
+    hasMoreItems: paginated.hasMoreItems,
+    pagesFetched: paginated.pagesFetched,
+    requestedLimit: paginated.requestedLimit,
     items,
   };
 }
