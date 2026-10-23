@@ -3,6 +3,7 @@ export type ProjectRole = "admin" | "member" | "viewer";
 export type ProjectPermission =
   | "project.read"
   | "project.write"
+  | "project.view.write"
   | "item.add"
   | "item.create"
   | "item.assign"
@@ -17,6 +18,7 @@ export type ProjectPermission =
 export const PROJECT_PERMISSIONS: readonly ProjectPermission[] = [
   "project.read",
   "project.write",
+  "project.view.write",
   "item.add",
   "item.create",
   "item.assign",
@@ -45,6 +47,7 @@ const ROLE_PERMISSIONS: Record<ProjectRole, readonly ProjectPermission[]> = {
   admin: [
     "project.read",
     "project.write",
+    "project.view.write",
     "item.add",
     "item.create",
     "item.assign",

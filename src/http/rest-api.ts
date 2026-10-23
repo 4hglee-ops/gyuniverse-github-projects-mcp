@@ -25,6 +25,10 @@ import {
   scopeIncludes,
 } from "../oauth/stateless.js";
 import { configForRemoteScope, resolveRemotePrincipal } from "./remote-mcp.js";
+import { GitHubRestClient } from "../github/rest-client.js";
+import { ProjectViewService } from "../core/views/project-view-service.js";
+import type { ViewPlanStore } from "../core/views/view-plan-store.js";
+import { viewApplySchema, viewPreviewSchema, viewTargetSchema } from "../core/views/view-plan.js";
 
 const projectInput = z.object({
   owner: z.string().min(1),
@@ -92,6 +96,8 @@ export interface RestApiRuntimeOptions {
   identityRegistry?: OAuthIdentityRegistry;
   auditService?: AuditService;
   bulkStore?: BulkPlanStoreLike;
+  restClient?: GitHubRestClient;
+  viewPlanStore?: ViewPlanStore;
 }
 
 export function restPathRequiresWrite(pathname: string): boolean {
@@ -113,6 +119,9 @@ function errorCode(error: unknown): string {
 
 function statusForError(error: unknown): number {
   const code = errorCode(error);
+  if (["VIEW_PLAN_STORE_UNAVAILABLE", "VIEW_PLAN_DURABILITY_REQUIRED", "VIEW_PLAN_STORE_FULL"].includes(code)) return 503;
+  if (["VIEW_PLAN_STALE", "VIEW_PLAN_IN_PROGRESS", "VIEW_PLAN_MISMATCH", "VIEW_PLAN_EXPIRED", "VIEW_PLAN_BLOCKED"].includes(code)) return 409;
+  if (code.startsWith("VIEW_UPSTREAM_")) return 502;
   if (["PERMISSION_DENIED", "CAPABILITY_REQUIRED", "IDENTITY_REQUIRED", "PROJECT_MEMBERSHIP_DENIED", "PROJECT_WRITE_NOT_ALLOWED"].includes(code)) return 403;
   return 400;
 }
@@ -124,6 +133,9 @@ interface ActionErrorAdvice {
 }
 
 export function actionErrorAdvice(code: string): ActionErrorAdvice {
+  if (code.startsWith("VIEW_")) {
+    return { category: "conflict", retryable: false, userAction: "Read current Views and plan results. Resolve manual items or uncertain locks before creating a new preview; never blindly retry a write." };
+  }
   if (code === "UNAUTHORIZED") {
     return { category: "authentication", retryable: false, userAction: "Reconnect or re-authorize the action with a valid OAuth session." };
   }
@@ -248,6 +260,17 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
 
     if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     const body = await requestBody(request);
+
+    if (["/api/v1/project/views", "/api/v1/project/views/preview", "/api/v1/write/views/apply", "/api/v1/write/views/update"].includes(url.pathname)) {
+      const views = new ProjectViewService({ config, client, rest: options.restClient ?? new GitHubRestClient(config.githubToken),
+        principal: scopedPrincipal, projects, audit: auditService, store: options.viewPlanStore });
+      if (url.pathname === "/api/v1/project/views") {
+        const input = viewTargetSchema.parse(body);
+        return json({ ok: true, data: await views.list(input.owner, input.number) });
+      }
+      if (url.pathname === "/api/v1/project/views/preview") return json({ ok: true, data: await views.preview(viewPreviewSchema.parse(body)) });
+      return json({ ok: true, data: await views.apply(viewApplySchema.parse(body), url.pathname.endsWith("/update") ? "update" : "template") });
+    }
 
     if (url.pathname === "/api/v1/project/brief") {
       const input = projectInput.parse(body);

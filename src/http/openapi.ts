@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { viewApplySchema, viewPreviewSchema, viewTargetSchema } from "../core/views/view-plan.js";
+
 const projectRequestSchema = {
   type: "object",
   additionalProperties: false,
@@ -197,6 +200,13 @@ export function openApiDocument(baseUrl: string) {
     },
     servers: [{ url: base }],
     paths: {
+      "/api/v1/project/views": { post: readOperation("list_project_views", "List complete authorized Project View configuration.", z.toJSONSchema(viewTargetSchema)) },
+      "/api/v1/project/views/preview": { post: readOperation("preview_project_view_setup", "Persist a 15-minute immutable View template or update preview; no GitHub changes.",
+        { ...z.toJSONSchema(viewPreviewSchema), oneOf: [{ required: ["template"] }, { required: ["update"] }] }) },
+      "/api/v1/write/views/apply": { post: writeOperation("apply_project_view_setup", "Explicitly approve an exact template plan and apply supported View changes.", z.toJSONSchema(viewApplySchema),
+        "Admin-only. Requires approved=true, exact planId/digest and target. Rechecks ACL/state, serializes per Project and verifies/audits changes. Inspect partial or uncertain results; never blindly retry. Existing Views and fields are preserved.") },
+      "/api/v1/write/views/update": { post: writeOperation("update_project_view", "Explicitly approve a supported View update preview.", z.toJSONSchema(viewApplySchema),
+        "Admin-only. Preview an update first, then approve its exact plan. Supports name/filter/layout/visible fields only. Group/sort/Roadmap dates require GitHub UI. No View deletion is exposed. Partial results require inspection.") },
       "/api/v1/identity": {
         get: {
           operationId: "getIdentityContext",

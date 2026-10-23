@@ -24,18 +24,24 @@ import { registerRelationshipTools } from "./relationship-tools.js";
 import { registerRelationshipWriteTools } from "./relationship-write-tools.js";
 import { registerBulkPlanTools } from "./bulk-plan-tools.js";
 import { WbsFieldSetupService } from "../project-foundation/wbs-field-setup.js";
+import { GitHubRestClient } from "../github/rest-client.js";
+import { ProjectViewService } from "../core/views/project-view-service.js";
+import type { ViewPlanStore } from "../core/views/view-plan-store.js";
+import { registerProjectViewTools } from "./project-view-tools.js";
 
 export interface BuildServerOptions {
   config: AppConfig;
   client: GitHubGraphQlClient;
   principal?: AuthenticatedPrincipal | null;
+  restClient?: GitHubRestClient;
+  viewPlanStore?: ViewPlanStore;
 }
 
 function json(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
-export function buildMcpServer({ config, client, principal = null }: BuildServerOptions): McpServer {
+export function buildMcpServer({ config, client, principal = null, restClient, viewPlanStore }: BuildServerOptions): McpServer {
   const server = new McpServer({ name: "gyuniverse-github-projects-mcp", version: "0.2.0" });
 
   const projectService = new ProjectService({ config, client, principal });
@@ -49,6 +55,8 @@ export function buildMcpServer({ config, client, principal = null }: BuildServer
   const writePolicy = new WritePolicy(config, principal);
   const auditService = new AuditService(200);
   const mutationService = new ProjectMutationService({ client, writePolicy, auditService });
+  registerProjectViewTools(server, new ProjectViewService({ config, client, rest: restClient ?? new GitHubRestClient(config.githubToken),
+    principal, projects: projectService, audit: auditService, store: viewPlanStore }));
   const resolveProject = projectService.resolveProject.bind(projectService);
   const governance = createM10GovernanceServices({
     config,
