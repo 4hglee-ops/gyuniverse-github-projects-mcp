@@ -27,10 +27,11 @@ async function fixture(t: TestContext) {
   const env = { PUBLIC_BASE_URL: ROOT, MCP_OAUTH_SIGNING_SECRET: KEY, GYP_ADMIN_CONSOLE_ENABLED: "true", GYP_ADMIN_SESSION_BRIDGE_ENABLED: "true", VERCEL_ENV: "preview" };
   const previous = new Map(Object.keys(env).map((k) => [k, process.env[k]]));
   Object.assign(process.env, env); t.after(() => { for (const [k, v] of previous) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } });
-  let now = Math.floor(Date.now() / 1000), name = "Original", mutations = 0;
+  let clockOffset = 0, name = "Original", mutations = 0;
+  const now = () => Math.floor(Date.now() / 1000) + clockOffset;
   const user = { subject: "user:fixture-admin", accessCode: "synthetic-admin-session-access-code", role: "admin" as "admin" | "viewer", projectIds: ["PVT"] };
   let registry = new OAuthIdentityRegistry([user]);
-  const redis = new RedisDouble(), store = new RedisAdminSessionStore(redis, () => now);
+  const redis = new RedisDouble(), store = new RedisAdminSessionStore(redis, now);
   const conn = (nodes: unknown[] = []) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
   let onRead: (() => Promise<void>) | null = null;
   class Client extends GitHubGraphQlClient {
@@ -46,8 +47,8 @@ async function fixture(t: TestContext) {
   const options = { config: { githubToken: "synthetic-unused", allowedOwners: ["fixture-org"], allowedProjectIds: ["PVT", "OTHER"], writeEnabled: true },
     client: new Client("synthetic-unused"), sessionStore: store, viewPlanStore: new MemoryViewPlanStore(), auditService: new AuditService(200, new MemoryWriteAuditStore()),
     restClient: new GitHubRestClient("synthetic-unused", { fetchImplementation: async () => { throw new Error("Unexpected external REST request"); } }),
-    auth: { registry: () => registry, teamStore: () => null, now: () => now, bindingKey: KEY } };
-  const bearer = await signEnvelope("gypa", { typ: "access_token", sub: user.subject, aud: ROOT + "/mcp", scope: "projects:read projects:write", iat: now, exp: now + 3600,
+    auth: { registry: () => registry, teamStore: () => null, now, bindingKey: KEY } };
+  const bearer = await signEnvelope("gypa", { typ: "access_token", sub: user.subject, aud: ROOT + "/mcp", scope: "projects:read projects:write", iat: now(), exp: now() + 3600,
     identityVersion: registry.credentialVersion(user.subject, KEY) });
   const call = (path: string, method = "GET", body?: unknown, cookie?: string, csrf?: string, auth?: string) => handleAdminRequest(new Request(ROOT + "/api/admin/v1/" + path, {
     method, headers: { ...(method === "POST" ? { origin: ROOT, "content-type": "application/json" } : {}), ...(cookie ? { cookie } : {}), ...(csrf ? { "x-csrf-token": csrf } : {}), ...(auth ? { authorization: "Bearer " + auth } : {}) },
@@ -57,7 +58,7 @@ async function fixture(t: TestContext) {
     const body = await response.json() as { data: { csrf: string } }; return { cookie: response.headers.get("set-cookie")!.split(";")[0]!, csrf: body.data.csrf, response }; };
   return { options, bearer, redis, store, call, login, user, get mutations() { return mutations; },
     change: (patch: Partial<typeof user>) => { registry = new OAuthIdentityRegistry([{ ...user, ...patch }]); },
-    advance: (seconds: number) => { now += seconds; }, onRead: (fn: () => Promise<void>) => { onRead = fn; } };
+    advance: (seconds: number) => { clockOffset += seconds; }, onRead: (fn: () => Promise<void>) => { onRead = fn; } };
 }
 test("admin session routes default off, refuse Production/foreign origins, and never enable management APIs", async (t) => {
   const s = await fixture(t); process.env.GYP_ADMIN_CONSOLE_ENABLED = "false";
@@ -157,4 +158,11 @@ test("session bootstrap revalidates after async persistence before confirming lo
   assert.ok([...s.redis.values.values()].every(raw=>JSON.parse(raw).revokedAt!==null));
   s.change({role:"admin"});s.store.create=async(record)=>{await create(record);s.advance(3601);};
   const expired=await s.call("session","POST",{},undefined,undefined,s.bearer);assert.equal(expired.status,401);assert.equal((await expired.json() as {ok:boolean}).ok,false);assert.doesNotMatch(expired.headers.get("set-cookie")??"",/Max-Age=[1-9]/);
+});
+
+
+test("session bootstrap across a clock second keeps proof, record and store clocks aligned",async(t)=>{
+  const start=Date.now();t.mock.timers.enable({apis:["Date"],now:start});
+  const s=await fixture(t);t.mock.timers.setTime(start+1100);
+  const auth=await s.login();assert.equal((await s.call("session","GET",undefined,auth.cookie)).status,200);
 });

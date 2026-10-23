@@ -477,3 +477,10 @@ PR #20 전체 관리자 UI는 통합되지 않았다. 사용자/역할 CRUD, 키
 증거는 `/tmp/gyuniverse-admin-identity-final-review/`에 보존한다. 이전 409개 결과는 앞 단계 스냅샷이며 최종 PR의 검증 수는 411개다. 원격 기준 통합 브랜치는 게시 전 `2a2ab74747645e42f9a5a6fbd8cf26c5ead004c6`였고 같은 head/base PR은 없었다. 이 단계는 검증된 35개 파일의 commit/push/통합 PR 및 검사 후 일반 병합까지 승인된 범위다. main/develop·수동 배포·실제 설정/자격증명/DB/권한/View 변경은 제외한다. 최종 원격 커밋·CI·병합 결과는 PR과 실행 보고를 따른다.
 
 후속 계획은 (1) actor-scoped RPC wire DTO와 identity/credential/team 연결·기대 버전/operationId·감사/영수증 원자성 계약, (2) 폐기 가능한 SQL/Redis engine 검증, (3) 승인 후 전용 환경 실제 연결로 나눈다. 현재 Docker daemon은 읽기 조회에 응답했지만 Postgres/Redis 실행 파일과 cached container image는 없으며 이번에 engine/container를 실행하거나 설치하지 않았다. 후속 코드/격리 엔진 검증은 실제 전용 Supabase 재개·migration·운영 자격증명 변경 없이 준비할 수 있다. 실제 DB 연동은 INACTIVE 상태/004 적용 이력을 먼저 확인하고, 재개·migration·service-role/별도 관리 authority 설정, 실제 OAuth/키·grant/권한 테스트에 필요한 명시 승인과 폐기 가능한 테스트 대상이 필요하다.
+
+
+### PR #28 CI 시계 경계 회귀 수정
+
+PR #28 최초 head `dec68e71e52bda9b0cdac23ca3ae899300fbbf68`에서 Gitleaks와 CI 타입/빌드는 통과했지만 테스트는 410/411이었다. 실패 위치는 console fixture의 login이며, 고정한 store/auth 시각과 실제 record 생성 시각이 초 경계에서 달라 정상 record를 미래로 판단한 테스트 시계 불일치였다. fixture가 실제 시각에 동일 offset을 더하도록 통일하고 Date를 1.1초 진행하는 결정적 회귀를 추가했다. 런타임 만료/미래 record 거부 검사를 완화하거나 테스트를 skip하지 않았다.
+
+수정 후 로컬 전체 **412/412, 실패/skip 0**, 일반/Vercel 타입·빌드 및 관리8+View6 브라우저 그룹을 재검증했다. 최초 실패 실행은 `https://github.com/4hglee-ops/gyuniverse-github-projects-mcp/actions/runs/39986142333`에 남으며, 병합은 수정된 최종 head의 새 CI/Gitleaks 성공 뒤에만 진행한다. 변경 경로는 동일 35개 안의 console test와 이 문서뿐이다.
