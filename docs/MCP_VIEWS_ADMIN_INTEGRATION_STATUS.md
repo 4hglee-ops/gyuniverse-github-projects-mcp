@@ -326,7 +326,9 @@ Chromium `154.0.8037.57`와 환경에 설치된 Playwright Core로 **10개 시�
 
 증거는 클라우드 `/tmp/gyuniverse-admin-browser-validation/`에 보존했다: 재실행 가능한 `browser-check.mjs`, `report.json`, `browser-run.log`, desktop/mobile/partial PNG. 브라우저 API는 모의 서버이므로 실제 API 권한·GitHub mutation·Redis/Lua가 검증됐다는 의미가 아니다. 로컬 헤더 검증은 Vercel edge의 실제 헤더 적용이나 보호된 Preview HTTPS 인증 검증을 대체하지 않는다. 실행 코드가 그대로이므로 기존 **362/362** 결과가 유지되는 동일 코드 스냅샷이다. 이번 단계의 저장소 수정은 이 문서뿐이다.
 
-## 관리자 PR #20 포팅 계획 — 설계만, 아래 구현/운영 조작은 미실행
+## 관리자 PR #20 포팅 계획 — 전체 36개 파일의 미완료 계획
+
+아래 표는 최초 설계의 전체 범위다. 이후 부분 구현 상태는 이 문서 마지막의 신원·세션 연결 기록을 따른다. 표에 경로가 있다는 이유로 해당 기능이 구현되거나 실제 적용됐다고 간주하지 않는다.
 
 이 계획은 현재 View 화면을 전체 관리자 콘솔과 연결하기 위한 검토 범위다. 현재 승인된 12개 파일 밖의 코드 포팅, SQL 작성/적용, 설정·사용자·grant 변경은 이번에 수행하지 않았다. 원격 #20을 통째로 병합하지 않고 아래 단계별 diff와 합성 증거를 먼저 만든다. 실제 파일 수정·게시 범위는 이 계획 검토 뒤 별도로 확정한다.
 
@@ -403,3 +405,75 @@ A→B→C를 각각 검증 가능한 코드 단계로 분리한다. B의 관리 
 - **합성으로 확인 가능:** subject/scope/version 검증, legacy/추가 identity 호환, 세션 TTL·폐기 계약·CSRF, 역할/Project/team 교집합, scoped UI 목록, 변경 상한, mutation 직전 최신 권한 hook, 응답 유실/중복 operationId 계약, 일회성 키 DOM 정리, local browser/CSP/모바일, 일반/Vercel 타입·전체 회귀.
 - **실제 또는 격리된 SQL 엔진 검증 필요:** migration 적용 이력, SQL/RLS/service-role/RPC transaction, 실제 Redis 원자성·재시작 내구성, DB/Redis 시간 제한·장애, 개인 OAuth 재인증/갱신/폐기, 실제 권한 회수 중 동작, Vercel Preview의 HTTPS cookie·CSP·보호 계층, 실제 GitHub View의 시각 결과.
 - **현재 미승인·미실행:** DB 재개/적용, 실제 사용자/권한·키·토큰 생성/설정, 실제 View 변경, 운영 보안 설정과 수동 배포. 이번에는 브라우저 검증과 계획 문서만 추가했고, 검증 전 포팅 코드를 병합하지 않았다.
+
+
+## 2026-10-23 신원·세션 HTTP/View UI 부분 연결 — 로컬 검증, 미게시
+
+기준 브랜치는 `codex/admin-identity-foundation`, HEAD는 `2a2ab74747645e42f9a5a6fbd8cf26c5ead004c6`이다. 기존 8개 신원 기반 파일을 포함하여 현재 **24개 파일**을 변경했다. 커밋·push·PR·병합·배포는 하지 않았다. 위 36개 파일 표는 여전히 전체 미완료 포팅 계획이며, 다음 부분만 구현됐다.
+
+| 범위 | 현재 코드 및 검증 |
+| --- | --- |
+| A 신원·세션·별도 관리 정책 | 검증된 개인 proof, 현재 registry/team ACL 및 서버 범위의 교집합. 별도 사용자/키 관리 capability는 기본 거부이며 HTTP 관리 기능에 연결하지 않음 |
+| B OAuth | 개인 authorization code/access/refresh에 HMAC identityVersion 전달. 바인딩된 코드/refresh는 현재 코드 교체·삭제 시 거부. 기존 버전 없는 토큰은 호환하되 관리자 세션으로 승격하거나 refresh 때 새 버전을 붙이지 않음. 기존 signing key가 32자 미만이면 신규 privileged binding을 만들지 않음 |
+| B 세션 저장소 | Redis NX+TTL 생성, 원자적 폐기/로그인 횟수 Lua 계약, 별도 namespace, 오류 시 거부. deployed 경로에 memory fallback 없음. 실제 Redis/Lua 실행은 미검증 |
+| B HTTP | `console.ts`에서 서버 개인 신원 바인딩, 세션 회전·폐기·만료, Origin/CSRF, 중복 cookie 거부, 입력 제한, 오류 비노출. `view-adapter.ts`/router에서 동일 catalog/View Core 사용 |
+| B Core | 세션 BFF는 apply 시작과 각 mutation 직전에 현재 신원/ACL/scope/write gate 및 계획 TTL 재확인. 첫 mutation 뒤 회수되면 후속 변경 중단·부분 결과 유지. 기존 public MCP/REST에 이 재검증 hook을 연결하는 포팅은 미완료 |
+| C View 화면 | 기존 bearer 진입 유지, 선택 가능한 same-origin session bootstrap/resume/logout 및 cookie+CSRF transport. bootstrap 뒤 bearer를 지우며 저장소에 저장하지 않음. 인증 실패 시 UI 초기화·다른 인증으로 자동 fallback 없음 |
+| C 헤더 | admin BFF rewrite 추가. 기존 self CSP 유지, 외부 JS/CSS 로딩 검증 |
+
+**기본 비활성:** `GYP_ADMIN_CONSOLE_ENABLED=true`, 신규 `GYP_ADMIN_SESSION_BRIDGE_ENABLED=true`, `VERCEL_ENV=preview`를 모두 만족해야 BFF가 열린다. 하나라도 누락되거나 Production이면 404이며 store 생성도 하지 않는다. 기존 #20 flag 하나만으로 신규 세션 인증이 켜지지 않는다. 공유 store/충분한 기존 binding key/현재 개인 Admin/현재 ACL이 없으면 요청을 거부한다. 실제 환경 변수·자격증명·관리 authority 설정은 변경하지 않았다. 이 경로는 #20 공유 비밀번호 로그인 대신 기존 개인 OAuth proof를 요구하며, 비밀번호만으로 세션을 만들지 않는다.
+
+### 검증 결과와 증거
+
+- 일반 타입 검사, Vercel 타입 검사, build, JS 문법 검사, diff whitespace 검사 통과.
+- 전체 **395/395 통과, 실패 0, skip 0**. 초기 테스트 double override의 반환 타입 오류를 수정한 뒤 전체 재검증했다. 테스트 skip이나 입력 schema 완화는 하지 않았다.
+- 실제 Chromium의 합성 HTTPS origin에서 **6개 브라우저 검증 그룹 통과**: HttpOnly/Secure/Strict host cookie와 token DOM 삭제, Project/View 계획·명시 적용·중복 클릭/CSRF 거부, reload 뒤 cookie resume, 서버 logout/replay 거부, 역할 축소 UI/서버 거부, CSP 및 모바일 390px 가로 넘침 없음. 모든 요청은 로컬 intercept로 처리했고 외부/OAuth endpoint 요청·브라우저 storage·미처리 JS 오류는 0개다. 합성 View mutation은 1회였다.
+- 증거 경로: `/tmp/gyuniverse-admin-session-validation/`의 `full-test.log`, `build.log`, `typecheck.log`, `typecheck-vercel.log`, `browser-session.mjs`, `browser-session-report.json`, `session-mobile.png`, 최종 manifest 및 patch. 브라우저는 실제 console/View handler에 Redis/GraphQL 계약 double을 주입했다. 실제 TLS 서버/Vercel edge/실제 Redis 내구성·Lua 실행을 확인한 것이 아니다.
+
+### 미포함 및 다음 단계
+
+PR #20 전체 관리자 UI는 통합되지 않았다. 사용자/역할 CRUD, 키 발급·폐기 및 최초 1회 표시, 관리형 DB OAuth adapter, scoped 관리 RPC, 관리자 audit 목록 화면, 관리 화면 index/console.js/css, public MCP/REST/build-server의 새 resolver/hook 연결 및 M13 운영 문서는 미완료다. Project Admin과 별도 사용자/키 관리 권한은 합치지 않았고 관리 endpoint는 404다. 기존 View write 감사는 공통 Core를 사용하지만 관리자 관리행위 DB 감사의 구현을 뜻하지 않는다.
+
+실제 연동 없이 다음에 가능한 작업은 public MCP/REST resolver/hook 회귀 연결과, 주입 가능한 모의 관리 adapter를 통한 사용자·키·감사 UI 코드 포팅이다. 실제 관리형 DB adapter를 활성화하기 전에는 actor/credential와 team principal 연결 및 RPC 내부 범위 검사 계약을 확정해야 한다. 운영 작업 권한을 새로 설정할 필요 없이 코드·합성 테스트를 계속 준비할 수 있다.
+
+별도 승인·실제 증거가 필요한 항목은 DB 재개·migration 적용, 실제 OAuth 로그인/토큰·grant·키 발급 및 자격증명 설정, 사용자/역할·운영 권한 변경, 실제 서비스 연결·View 변경과 배포다. Supabase `xdeygntepdjhwdiropwr`는 이전 INACTIVE 확인 이후 재조회·재개하지 않았으며, #20 migration 문서/PR 설명의 충돌은 미해결이다. 이번 코드 검증으로 적용 사실을 가정하지 않는다. 새 파일별 승인 요구 문서는 발견되지 않았고 이 실행에서 거부되거나 실행 여부가 불명확한 외부 변경은 없다.
+
+
+## 2026-10-23 public transport·관리 모의 UI 포팅 — 미게시 검증 단위
+
+이번 단계는 직전 24개 변경 파일을 보존하고 **총 35개 파일**까지 확장했다. 모두 위 36개 계획 표 안의 경로이며, 별도 변경 승인이 필요한 저장소 지침은 발견되지 않았다. 추가 11개는 `src/http/remote-mcp.ts`, `src/http/remote-mcp.test.ts`, `src/http/rest-api.ts`, `src/http/rest-api.test.ts`, `src/mcp/build-server.ts`, `src/admin/managed-auth.ts`, `src/admin/managed-auth.test.ts`, `public/admin/index.html`, `public/admin/console.js`, `public/admin/console.css`, `docs/M13_ADMIN_CONSOLE_PREVIEW.md`다. 직전 기반 파일의 resolver/console/View 연결 테스트도 보강했다. `src/oauth/endpoints.test.ts`는 변경하지 않았으며 개인 version 전파 회귀는 `individual-identity.test.ts`에 있다.
+
+- **public MCP/REST:** 공통 verified operator resolver로 현재 개인 credential version·팀 ACL·scope/서버 범위를 확인한다. admin cookie만으로 public API에 들어갈 수 없다. View Core apply에 mutation 직전 비동기 재검증 hook을 전달했다. 실제 MCP JSON transport와 REST 경로에서 최종 pre-read 중 역할 회수 시 mutation 0회를 확인했다. 기존 비-View 쓰기는 요청 시작 시 현재 resolver를 사용하며 세부 단계마다 View hook을 확대하지 않았다.
+- **관리 모의 adapter:** 별도 AdminPolicy, 현재 개인 proof/ACL, 전체 기존/신규 대상 scope·역할 상한, expectedVersion 및 operationId를 확인한다. double transaction 안에서 대기 후와 비동기 policy 조회 후 최신 권한을 재확인한다. mutation·감사·영수증은 함께 저장하며 동일 operation의 동시/응답 유실 재호출은 새 키/감사를 만들지 않고 원문을 반환하지 않는다.
+- **사용자·키·감사 UI:** 서버 session bootstrap/resume/logout, 범위별 목록, 사용자 생성/역할·Project·활성 metadata 수정, 합성 키 발급/폐기, 검증된 개인 actor 감사 표시를 구현했다. 생성 metadata가 OAuth 신원·Project grant로 연결되지 않는다. 키는 실제 인증이 불가능한 `synthetic-only-` 형식만 허용하며 최초 응답에서만 표시하고 숨김/30초/세션 만료/오류/logout/pagehide/탭 숨김 시 지운다. 응답 유실은 자동 재시도하지 않고 mutation을 막으며 목록/감사를 본 뒤 명시적 확인 버튼으로만 새 작업을 연다.
+- **기본 비활성 유지:** 앞의 session 두 flag+Preview 조건 외에 관리 route는 신규 `GYP_ADMIN_MANAGEMENT_BRIDGE_ENABLED=true`가 필요하다. 서버 주입 adapter/authority가 없으면 503/403이며 배포 entrypoint에 이를 설치하지 않았다. flag만으로 관리 권한이나 DB OAuth가 생기지 않는다. shared store의 실제 키 발급은 코드에서 거부한다. 실제 환경 변수는 변경하지 않았다.
+- **수정한 호환 결함:** OAuth 발급의 signing key 정규화와 resolver의 identityVersion 검증이 공백 포함 환경 값에서 불일치할 수 있어 동일하게 trim하도록 맞추고 회귀 테스트를 추가했다. 실제 비밀값은 읽거나 출력하지 않았다.
+
+### 최종 검증
+
+전체 **409/409 통과, 실패 0, skip 0**. 일반 타입 검사, Vercel 타입 검사, build, 두 UI JS 문법 검사, tracked/untracked diff 검사를 통과했다. 기존 bearer/OAuth/legacy transport·Project #2·실제 socket 회귀를 skip하거나 약화하지 않았다.
+
+실제 Chromium으로 **신규 관리 화면 8개 그룹 + 기존 View 세션 6개 그룹**을 통과했다. 관리 그룹은 범위 밖 기록 비노출, 명시적 사용자 생성과 중복 클릭 1회 처리, 합성 키 최초 표시/숨김·reload 비복구, 버전 기반 역할 수정·폐기/actor 감사, 발급 응답 유실 시 반복 차단·수동 확인, cookie resume, 권한 축소 UI 초기화·logout, self CSP/모바일390·desktop1280, 외부 요청/OAuth endpoint·브라우저 storage·미처리 JS 오류 0개를 포함한다. 모든 브라우저 요청은 로컬 합성 HTTPS origin에서 intercept하며 실제 console handler와 모의 Redis/management/Core를 실행했다.
+
+증거: `/tmp/gyuniverse-admin-management-validation/`의 `full-test.log`, `typecheck.log`, `typecheck-vercel.log`, `build.log`, `browser-management.mjs`, `browser-management-report.json`, `management-mobile.png`, `browser-session-regression.log`, manifest 및 전체 patch. 이전 View 브라우저 harness/report는 `/tmp/gyuniverse-admin-session-validation/`에 있다. 비밀값이나 cookie/header 원문은 보고서에 기록하지 않았다.
+
+### PR #20 대비 및 남은 작업
+
+상세 기능 표는 `M13_ADMIN_CONSOLE_PREVIEW.md`에 있다. 비교 기준은 로컬 보존 #20 head `ff1d03b082c3683d16682cd4dc22346915fa804c`다. 공유 비밀번호만으로 관리자 권한을 얻는 방식을 포팅하지 않았고, 개인 proof·별도 authority로 대체했다. 사용자/역할/키/감사 화면은 모의 계약 수준에서 포함됐지만 **실제 관리형 DB OAuth와 전체 운영 통합 완료를 뜻하지 않는다**.
+
+순수 코드로 남은 일은 actor/credential/team principal 연결 및 actor-scoped RPC wire DTO를 구체화하고, 기존 004와의 차이를 검토하며 폐기 가능한 SQL/Redis 엔진 테스트를 준비하는 것이다. 현재 callback transaction double은 DB RPC 구현이 아니다. 실제 adapter는 actor·전체 대상 scope/role·기대 버전/operationId를 SQL에 전달하고 transaction 안에서 최신 identity/team/resource 권한과 감사·영수증을 검증해야 한다. 실제 키 발급 adapter 및 OAuth code/refresh 연결은 그 계약/SQL 검증 전에는 활성화하지 않는다.
+
+현재 blocker는 실행 거부가 아니라 실제 연동 검증을 제외한 승인 범위와 미확인 DB 이력이다. 별도 사용자 조치가 필요한 것은 전용 Supabase 상태/004 적용 이력 확인 및 필요 시 재개/migration 승인, 실제 OAuth·세션 저장소·자격증명/별도 관리 authority 설정과 테스트 권한 승인, 마지막으로 Preview 실제 연동/배포 승인이다. `xdeygntepdjhwdiropwr` INACTIVE 및 문서/PR migration 불일치는 여전히 미해결이며 이번에 재조회/재개하지 않았다.
+
+브랜치 `codex/admin-identity-foundation`, 기준 SHA `2a2ab74747645e42f9a5a6fbd8cf26c5ead004c6` 유지. commit/push/PR/병합/배포, 실제 로그인·토큰/키·grant/권한·DB·외부 View 변경은 모두 미실행이다. 이번 실행에서 거부되거나 실행 여부가 불명확한 외부 변경도 없다.
+
+
+## 최종 게시 전 보안·회귀 검토
+
+동일 35개 파일을 검토하면서 두 경계를 보강했다. 세션 bootstrap은 비동기 저장/이전 세션 회전 뒤 현재 session·개인 proof·역할/ACL을 다시 검증한 후에만 성공 응답을 반환한다. 저장 중 역할 축소/만료는 cookie 활성화 없이 거부하고 생성 record를 폐기한다. 관리 operation receipt도 UUID·actor·digest·엄격한 result schema로 검증하여 예상 밖 secret 필드가 replay 응답에 섞이지 않게 했다.
+
+보강 후 **411/411 통과, 실패/skip 0**, 일반/Vercel 타입·빌드·JS 문법·diff 검사, 관리 브라우저 8개 및 View 세션 6개 그룹을 다시 통과했다. 기존 인증 모드/legacy transport와 cookie의 public bearer 대체 거부, 현재 권한 회수·원본 만료, 역할/Project/서버 범위 교집합을 검토했다. 신규 관리자 기능은 여전히 flag 누락/Production에서 닫히며 router/배포 entrypoint에는 management adapter·authority·managed OAuth DB resolver가 설치되지 않는다. 비밀 원문 로그/브라우저 저장소 추가는 없다.
+
+증거는 `/tmp/gyuniverse-admin-identity-final-review/`에 보존한다. 이전 409개 결과는 앞 단계 스냅샷이며 최종 PR의 검증 수는 411개다. 원격 기준 통합 브랜치는 게시 전 `2a2ab74747645e42f9a5a6fbd8cf26c5ead004c6`였고 같은 head/base PR은 없었다. 이 단계는 검증된 35개 파일의 commit/push/통합 PR 및 검사 후 일반 병합까지 승인된 범위다. main/develop·수동 배포·실제 설정/자격증명/DB/권한/View 변경은 제외한다. 최종 원격 커밋·CI·병합 결과는 PR과 실행 보고를 따른다.
+
+후속 계획은 (1) actor-scoped RPC wire DTO와 identity/credential/team 연결·기대 버전/operationId·감사/영수증 원자성 계약, (2) 폐기 가능한 SQL/Redis engine 검증, (3) 승인 후 전용 환경 실제 연결로 나눈다. 현재 Docker daemon은 읽기 조회에 응답했지만 Postgres/Redis 실행 파일과 cached container image는 없으며 이번에 engine/container를 실행하거나 설치하지 않았다. 후속 코드/격리 엔진 검증은 실제 전용 Supabase 재개·migration·운영 자격증명 변경 없이 준비할 수 있다. 실제 DB 연동은 INACTIVE 상태/004 적용 이력을 먼저 확인하고, 재개·migration·service-role/별도 관리 authority 설정, 실제 OAuth/키·grant/권한 테스트에 필요한 명시 승인과 폐기 가능한 테스트 대상이 필요하다.

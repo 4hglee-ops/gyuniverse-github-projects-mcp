@@ -18,7 +18,7 @@ const connection = (nodes: unknown[] = []) => ({ nodes, pageInfo: end });
 const reference = (plan: ViewPlan): ViewApplyInput => ({ owner: "fixture-org", number: 3, planId: plan.planId, planDigest: plan.planDigest, approved: true });
 const admin = () => principalForRole("fixture-admin", "admin", { projectIds: ["PVT"] });
 
-function setup(options: { principal?: AuthenticatedPrincipal; store?: MemoryViewPlanStore; auditStore?: MemoryWriteAuditStore; writeEnabled?: boolean } = {}) {
+function setup(options: { principal?: AuthenticatedPrincipal; store?: MemoryViewPlanStore; auditStore?: MemoryWriteAuditStore; writeEnabled?: boolean; assertCurrentWrite?: (projectId: string) => Promise<void> } = {}) {
   const names = ["Title", "Status", "Priority", "Part", "Assignees", "Start date", "Target date", "Effort", "WBS Code", "Target", "Repository", "Linked pull requests", "Reviewers"];
   const fields: ViewField[] = names.map((name, i) => ({ id: "F" + i, restId: i + 1, name,
     dataType: ["Status", "Priority", "Part"].includes(name) ? "SINGLE_SELECT" : "TEXT",
@@ -85,7 +85,7 @@ function setup(options: { principal?: AuthenticatedPrincipal; store?: MemoryView
   const client = new Client("synthetic-unused"), rest = new Rest("synthetic-unused");
   const store = options.store ?? new MemoryViewPlanStore();
   const audit = new AuditService(200, options.auditStore ?? new MemoryWriteAuditStore());
-  const service = new ProjectViewService({ config, client, rest, principal, projects: new ProjectService({ config, client, principal }), store, audit, now: () => new Date(time) });
+  const service = new ProjectViewService({ config, client, rest, principal, projects: new ProjectService({ config, client, principal }), store, audit, now: () => new Date(time), assertCurrentWrite: options.assertCurrentWrite });
   return { service, fields, views, store, audit, get writes() { return writes; }, get requests() { return requests; },
     failAt: (n: number) => { failAt = n; }, loseResponse: () => { loseResponse = true; }, pause: (fn: () => Promise<void>) => { beforeCreate = fn; },
     advance: (ms: number) => { time += ms; }, revoke: () => { writable = false; },
@@ -93,6 +93,14 @@ function setup(options: { principal?: AuthenticatedPrincipal; store?: MemoryView
   };
 }
 const preview = (s: ReturnType<typeof setup>) => s.service.preview({ owner: "fixture-org", number: 3, template: "wbs-v1" });
+
+test("current authorization hook stops later mutations after access is withdrawn and preserves replay safety", async () => {
+  let checks = 0, revoked = true;
+  const s = setup({ assertCurrentWrite: async (projectId) => { assert.equal(projectId, "PVT"); if (++checks > 2 && revoked) throw new Error("PERMISSION_DENIED: Synthetic current access was removed."); } });
+  const p = await preview(s), result = await s.service.apply(reference(p));
+  assert.equal(result.state, "partial"); assert.equal(result.errorCode, "PERMISSION_DENIED"); assert.equal(s.writes, 1);
+  revoked = false; await s.service.apply(reference(p)); assert.equal(s.writes, 1);
+});
 
 function seedColumns(s: ReturnType<typeof setup>) {
   s.views.push({ id: "V1", number: 1, name: "Existing", layout: "TABLE_LAYOUT", filter: null,

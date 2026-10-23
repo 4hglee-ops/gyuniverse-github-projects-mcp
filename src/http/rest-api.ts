@@ -6,7 +6,7 @@ import type { BulkPlanStoreLike } from "../core/bulk/bulk-plan-store.js";
 import { createM10GovernanceServices } from "../core/governance/m10-services.js";
 import { IdentityContextService } from "../core/identity/identity-context-service.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
-import { createTeamAccessStore, resolveTeamScopedPrincipal } from "../core/teams/team-access-runtime.js";
+import { resolveVerifiedOperator, operatorConfig, operatorViewWriteGuard, type OperatorAuthOptions } from "./operator-auth.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { AuthorizedProjectItemReferenceResolver } from "../core/projects/project-item-reference-resolver.js";
 import { ProjectService } from "../core/projects/project-service.js";
@@ -24,7 +24,6 @@ import {
   OAUTH_WRITE_SCOPE,
   scopeIncludes,
 } from "../oauth/stateless.js";
-import { configForRemoteScope, resolveRemotePrincipal } from "./remote-mcp.js";
 import { GitHubRestClient } from "../github/rest-client.js";
 import { ProjectViewService } from "../core/views/project-view-service.js";
 import type { ViewPlanStore } from "../core/views/view-plan-store.js";
@@ -99,6 +98,7 @@ export interface RestApiRuntimeOptions {
   bulkStore?: BulkPlanStoreLike;
   restClient?: GitHubRestClient;
   viewPlanStore?: ViewPlanStore;
+  auth?: OperatorAuthOptions;
 }
 
 export function restPathRequiresWrite(pathname: string): boolean {
@@ -211,20 +211,16 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
   if (restPathRequiresWrite(url.pathname) && !scopeIncludes(access.scope, OAUTH_WRITE_SCOPE)) return writeScopeRequired();
 
   const baseConfig = options.config ?? loadConfig();
-  const config = configForRemoteScope(baseConfig, access.scope);
-  const principal = resolveRemotePrincipal(
-    access.sub,
-    config,
-    options.identityRegistry ?? OAuthIdentityRegistry.fromEnvironment(),
-  );
-  if (!principal) return unauthorized();
-  let scopedPrincipal;
-  try {
-    scopedPrincipal = await resolveTeamScopedPrincipal(principal, createTeamAccessStore());
-  } catch {
-    return json(errorPayload("TEAM_ACL_UNAVAILABLE", "Project authorization is temporarily unavailable."), 503);
+  const auth = { ...options.auth, registry: options.auth?.registry ?? (() => options.identityRegistry ?? OAuthIdentityRegistry.fromEnvironment()),
+    currentConfig: options.auth?.currentConfig ?? (() => options.config ?? loadConfig()) };
+  let operator;
+  try { operator = await resolveVerifiedOperator(token, baseConfig, auth); }
+  catch (error) {
+    if (errorCode(error) === "TEAM_ACL_UNAVAILABLE") return json(errorPayload("TEAM_ACL_UNAVAILABLE", "Project authorization is temporarily unavailable."), 503);
+    return unauthorized();
   }
-  if (!scopedPrincipal) return unauthorized();
+  const config = operatorConfig(operator), scopedPrincipal = operator.principal;
+  const assertCurrentWrite = operatorViewWriteGuard(operator, auth);
 
   const client = options.client ?? new GitHubGraphQlClient(config.githubToken);
   const projects = new ProjectService({ config, client, principal: scopedPrincipal });
@@ -269,7 +265,7 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
 
     if (["/api/v1/project/views", "/api/v1/project/views/preview", "/api/v1/write/views/apply", "/api/v1/write/views/update"].includes(url.pathname)) {
       const views = new ProjectViewService({ config, client, rest: options.restClient ?? new GitHubRestClient(config.githubToken),
-        principal: scopedPrincipal, projects, audit: auditService, store: options.viewPlanStore });
+        principal: scopedPrincipal, projects, audit: auditService, store: options.viewPlanStore, assertCurrentWrite });
       if (url.pathname === "/api/v1/project/views") {
         const input = viewTargetSchema.parse(body);
         return json({ ok: true, data: await views.list(input.owner, input.number) });

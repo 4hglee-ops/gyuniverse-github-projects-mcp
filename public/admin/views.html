@@ -7,11 +7,14 @@
   <link rel="stylesheet" href="./views.css"><script type="module" src="./views.js"></script>
 </head>
 <body>
-<header><p class="eyebrow">GYUNIVERSE · ADMIN WORKSPACE</p><h1>Project Views</h1><p>현재 보기 확인 → 변경 계획 비교 → 명시적 승인 → 결과 확인</p></header>
+<header><p class="eyebrow">GYUNIVERSE · ADMIN WORKSPACE</p><h1>Project Views</h1>
+    <a href="/admin/index.html">사용자·키·감사 관리</a><p>현재 보기 확인 → 변경 계획 비교 → 명시적 승인 → 결과 확인</p></header>
 <main>
   <section id="connection" class="panel">
     <h2>기존 인증으로 연결</h2><p>이미 발급된 개인 OAuth 액세스 토큰을 사용합니다. 이 화면은 토큰을 발급하거나 브라우저 저장소에 보관하지 않습니다.</p>
-    <form id="connect"><label for="token">OAuth 액세스 토큰</label><input id="token" type="password" autocomplete="off" required spellcheck="false"><button type="submit">연결</button></form>
+    <form id="connect"><label for="token">OAuth 액세스 토큰</label><input id="token" type="password" autocomplete="off" required spellcheck="false">
+      <label class="approval"><input id="session-mode" type="checkbox">Preview 관리자 세션 사용 (활성화된 환경의 개인 Admin만)</label><button type="submit">연결</button></form>
+    <button id="resume-session" type="button">기존 관리자 세션으로 연결</button>
   </section>
   <div id="workspace" hidden>
     <section class="panel"><div class="row"><h2 id="identity"></h2><button id="disconnect" type="button">연결 해제</button></div>
