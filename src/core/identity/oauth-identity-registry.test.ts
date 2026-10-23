@@ -3,6 +3,20 @@ import test from "node:test";
 
 import { OAuthIdentityRegistry } from "./oauth-identity-registry.js";
 
+test("credential versions are server-keyed, stable and change on code or key rotation without exposing codes", () => {
+  const record = { subject: "user:fixture", accessCode: "synthetic-version-code", role: "admin" as const, projectIds: ["PVT"] };
+  const key = "synthetic-version-binding-server-key-at-least-32-characters";
+  const registry = new OAuthIdentityRegistry([record]);
+  const version = registry.credentialVersion(record.subject, key)!;
+  assert.match(version, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(registry.credentialVersion(record.subject, key), version);
+  assert.notEqual(registry.credentialVersion(record.subject, key + "rotated"), version);
+  assert.notEqual(new OAuthIdentityRegistry([{ ...record, accessCode: "rotated-synthetic-code" }]).credentialVersion(record.subject, key), version);
+  assert.equal(registry.credentialVersion("unknown", key), null);
+  assert.throws(() => registry.credentialVersion(record.subject, "short"), /OPERATOR_BINDING_CONFIG_INVALID/);
+  assert.doesNotMatch(version, /synthetic-version-code/);
+});
+
 test("registry resolves an access code to an individual principal", () => {
   const registry = new OAuthIdentityRegistry([
     {

@@ -20,6 +20,7 @@ export interface RegisteredClientPayload {
 export type OAuthClientMode = "public_pkce" | "gpt_actions_confidential";
 
 export interface AuthorizationCodePayload {
+  identityVersion?: string;
   typ: "authorization_code";
   clientId: string;
   redirectUri: string;
@@ -33,6 +34,7 @@ export interface AuthorizationCodePayload {
 }
 
 export interface AccessTokenPayload {
+  identityVersion?: string;
   typ: "access_token";
   aud: string;
   scope: string;
@@ -42,6 +44,7 @@ export interface AccessTokenPayload {
 }
 
 export interface RefreshTokenPayload {
+  identityVersion?: string;
   typ: "refresh_token";
   aud: string;
   scope: string;

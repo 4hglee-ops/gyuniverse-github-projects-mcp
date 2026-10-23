@@ -75,6 +75,7 @@ export interface ProjectViewServiceOptions {
   config: AppConfig; client: GitHubGraphQlClient; rest: GitHubRestClient;
   projects: Pick<ProjectService, "resolveProject">; principal: AuthenticatedPrincipal | null; audit: AuditService;
   store?: ViewPlanStore; now?: () => Date;
+  assertCurrentWrite?: (projectId: string) => Promise<void>;
 }
 export class ProjectViewService {
   constructor(private readonly options: ProjectViewServiceOptions) {}
@@ -150,6 +151,7 @@ export class ProjectViewService {
     if (input.planDigest !== plan.planDigest || plan.artifact.kind !== kind || plan.artifact.owner !== input.owner || plan.artifact.number !== input.number) throw new Error("VIEW_PLAN_MISMATCH: Use the exact preview target, kind and digest.");
     const project = await this.options.projects.resolveProject(input.owner, input.number);
     if (projectIdOf(project) !== plan.artifact.projectId) throw new Error("VIEW_PROJECT_MISMATCH: Project identity changed.");
+    await this.options.assertCurrentWrite?.(plan.artifact.projectId);
     this.authorize(plan.artifact.projectId);
     if (["completed", "partial", "failed"].includes(plan.state)) return this.report(plan);
     if (plan.state === "applying") throw new Error("VIEW_PLAN_IN_PROGRESS: This plan has an unresolved apply; inspect its state.");
@@ -175,6 +177,8 @@ export class ProjectViewService {
           results.push({ name: action.name, viewId: action.viewId, changed: false, verified: action.action === "skip-compatible", outcome: action.action === "manual-review" ? "manual-review" : "no_change", errorCode: null });
           continue;
         }
+        await this.options.assertCurrentWrite?.(plan.artifact.projectId);
+        this.unexpired(plan);
         mutationAttempted = true;
         const viewId = action.action === "create"
           ? await createProjectView(this.options.rest, input.owner, input.number, action.create!)

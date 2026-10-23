@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import {
   permissionsForRole,
   principalForRole,
@@ -102,5 +103,12 @@ export class OAuthIdentityRegistry {
       projectIds: record.projectIds,
       permissions: record.permissions,
     });
+  }
+
+  /** Server-keyed binding only; never expose a raw access code or its unkeyed hash. */
+  credentialVersion(subject: string, serverKey: string): string | null {
+    if (serverKey.length < 32) throw new Error("OPERATOR_BINDING_CONFIG_INVALID: A server binding key is required.");
+    const record = this.records.find((item) => item.subject === subject);
+    return record ? createHmac("sha256", serverKey).update(JSON.stringify(["operator-identity-v1", record.subject, record.accessCode])).digest("base64url") : null;
   }
 }

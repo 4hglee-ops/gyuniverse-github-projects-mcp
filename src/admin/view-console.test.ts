@@ -22,6 +22,9 @@ interface Console {
   previewUpdate(id: string, changes: object): Promise<unknown>;
   invalidatePlan(): void;
   apply(approved: boolean): Promise<unknown>;
+  connectSession(token: string): Promise<unknown>;
+  resumeSession(): Promise<unknown>;
+  logoutSession(): Promise<unknown>;
 }
 const moduleUrl = new URL("../../public/admin/views.js", import.meta.url);
 const { createViewConsole, mountViewConsole } = await import(moduleUrl.href) as {
@@ -225,4 +228,66 @@ test("View assets use external scripts/styles, safe text rendering and same-orig
   const csp = headers.find((h) => h.key === "Content-Security-Policy")!.value;
   assert.match(csp, /script-src 'self'; style-src 'self'/); assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval/);
   assert.equal(headers.find((h) => h.key === "Cache-Control")!.value, "no-store");
+});
+test("session transport sends bearer only at bootstrap, scopes cookies/CSRF to admin routes, resumes and logs out", async () => {
+  const original = fixture(), calls: Array<{ path: string; init: RequestInit }> = [];
+  const csrf = "c".repeat(43);
+  const fetcher: typeof fetch = async (input, init = {}) => {
+    const path = String(input); calls.push({ path, init });
+    if (path === "/api/admin/v1/session") return Response.json({ ok: true, data: { authenticated: true, csrf } });
+    if (path === "/api/admin/v1/logout") return Response.json({ ok: true, data: { loggedOut: true } });
+    return original.fetcher(path.replace("/api/admin/v1/", "/api/v1/"), init);
+  };
+  const client = createViewConsole(fetcher);
+  await client.connectSession("synthetic-existing-versioned-bearer");
+  assert.equal(calls[0]!.init.credentials, "same-origin");
+  assert.equal((calls[0]!.init.headers as Record<string, string>).Authorization, "Bearer synthetic-existing-versioned-bearer");
+  client.selectProject("PVT"); await client.loadViews(); await client.previewUpdate("V", { name: "Renamed" }); await client.apply(true);
+  assert.ok(calls.every((c) => c.path.startsWith("/api/admin/v1/") && c.init.credentials === "same-origin"));
+  for (const call of calls.slice(1)) {
+    const headers = call.init.headers as Record<string, string>;
+    assert.equal(headers.Authorization, undefined);
+    if (call.init.method === "POST") assert.equal(headers["X-CSRF-Token"], csrf);
+  }
+  client.disconnect(); await client.resumeSession();
+  await client.logoutSession(); assert.equal(calls.at(-1)!.path, "/api/admin/v1/logout"); assert.equal(client.snapshot().identity, null);
+  assert.doesNotMatch(JSON.stringify(client.snapshot()), /synthetic-existing-versioned-bearer|cccccccccccc/);
+});
+
+test("management client needs approval, guards duplicate sends, displays synthetic value once and never stores/resends bearer",async()=>{
+  const {createAdminConsole}=await import(new URL("../../public/admin/console.js",import.meta.url).href);
+  const calls:Array<{path:string;init:RequestInit}>=[];let gate:(()=>void)|undefined;
+  const fetcher:typeof fetch=async(input,init={})=>{const path=String(input);calls.push({path,init});
+    if(path.endsWith("/session"))return Response.json({ok:true,data:{authenticated:true,csrf:"c".repeat(43),expiresAt:Math.floor(Date.now()/1000)+600}});
+    if(path.endsWith("/overview"))return Response.json({ok:true,data:{actorId:"user:fixture",users:[],credentials:[],audit:[]}});
+    if(path.endsWith("/credentials")){await new Promise<void>(r=>{gate=r;});return Response.json({ok:true,data:{target:"fixture",secret:"synthetic-only-value",syntheticOnly:true}});}
+    return Response.json({ok:true,data:{loggedOut:true}});};
+  const client=createAdminConsole(fetcher,()=>{},()=>"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");await client.connect("synthetic-existing-bearer");
+  await assert.rejects(()=>client.mutate("credentials",{},false),/ADMIN_APPROVAL_REQUIRED/);
+  const pending=client.mutate("credentials",{subject:"fixture",expectedVersion:1},true);await new Promise(r=>setImmediate(r));
+  await assert.rejects(()=>client.mutate("credentials",{},true),/ADMIN_BUSY|ADMIN_RECONCILIATION_REQUIRED/);gate!();await pending;
+  assert.equal(client.snapshot().oneTime,"synthetic-only-value");client.hideSecret();assert.equal(client.snapshot().oneTime,null);
+  assert.equal(calls.filter(c=>c.path.endsWith("/credentials")).length,1);
+  for(const call of calls.slice(1)){assert.equal((call.init.headers as Record<string,string>).Authorization,undefined);if(call.init.method==="POST")assert.equal((call.init.headers as Record<string,string>)["X-CSRF-Token"],"c".repeat(43));}
+  await client.logout();assert.equal(client.snapshot().connected,false);assert.equal(client.snapshot().oneTime,null);
+  const js=await readFile(new URL("../../public/admin/console.js",import.meta.url),"utf8");assert.doesNotMatch(js,/innerHTML|localStorage|sessionStorage|console\.log|\/oauth\/token/);
+});
+test("management response loss latches mutations until explicit reconciliation; clear invalidates late output",async()=>{
+  const {createAdminConsole}=await import(new URL("../../public/admin/console.js",import.meta.url).href);let writes=0;
+  const client=createAdminConsole(async(input:RequestInfo|URL)=>{const path=String(input);
+    if(path.endsWith("/session"))return Response.json({ok:true,data:{authenticated:true,csrf:"c".repeat(43),expiresAt:Math.floor(Date.now()/1000)+600}});
+    if(path.endsWith("/overview"))return Response.json({ok:true,data:{actorId:"user:fixture",users:[],credentials:[],audit:[]}});
+    writes++;throw new TypeError("synthetic response lost");});
+  await client.resume();await assert.rejects(()=>client.mutate("users",{},true),/ADMIN_OUTCOME_UNKNOWN/);
+  await assert.rejects(()=>client.mutate("users",{},true),/ADMIN_RECONCILIATION_REQUIRED/);assert.equal(writes,1);assert.equal(client.snapshot().oneTime,null);
+  await client.reconcile();assert.equal(client.snapshot().uncertain,false);client.clear();assert.equal(client.snapshot().overview,null);
+});
+test("management UI expires session metadata and synthetic one-time DOM state without another request",{timeout:3000},async()=>{
+  const {createAdminConsole}=await import(new URL("../../public/admin/console.js",import.meta.url).href);
+  const client=createAdminConsole(async(input:RequestInfo|URL)=>{const path=String(input);
+    if(path.endsWith("/session"))return Response.json({ok:true,data:{authenticated:true,csrf:"c".repeat(43),expiresAt:Math.floor(Date.now()/1000)+1}});
+    if(path.endsWith("/overview"))return Response.json({ok:true,data:{actorId:"user:fixture",users:[],credentials:[],audit:[]}});
+    return Response.json({ok:true,data:{target:"fixture",secret:"synthetic-only-expiring",syntheticOnly:true}});});
+  await client.resume();await client.mutate("credentials",{},true);assert.equal(client.snapshot().oneTime,"synthetic-only-expiring");
+  await new Promise(r=>setTimeout(r,1100));assert.equal(client.snapshot().oneTime,null);assert.equal(client.snapshot().connected,false);assert.equal(client.snapshot().overview,null);client.clear();
 });

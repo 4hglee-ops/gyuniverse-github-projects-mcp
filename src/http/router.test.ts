@@ -133,3 +133,10 @@ test("unknown routes and unsupported methods fail closed", async () => {
   ));
   assert.equal(badMethod.status, 405);
 });
+test("admin routes stay disabled before auth/configuration when feature flag is absent", async () => {
+  const before = process.env.GYP_ADMIN_CONSOLE_ENABLED;
+  try { delete process.env.GYP_ADMIN_CONSOLE_ENABLED;
+    const response = await handleRemoteHttpRequest(new Request("https://example.test/api/admin/v1/session"));
+    assert.equal(response.status, 404);
+  } finally { if (before === undefined) delete process.env.GYP_ADMIN_CONSOLE_ENABLED; else process.env.GYP_ADMIN_CONSOLE_ENABLED = before; }
+});

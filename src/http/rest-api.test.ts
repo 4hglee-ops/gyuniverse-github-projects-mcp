@@ -89,6 +89,7 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
   const previous = new Map(Object.keys(vars).map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(vars)) process.env[key] = value;
   let name = "Original", mutations = 0, requests = 0;
+  let beforeViewRead: (() => void) | undefined;
   const conn = (nodes: unknown[] = []) => ({ nodes, pageInfo: { hasNextPage: false, endCursor: null } });
   class Client extends GitHubGraphQlClient {
     override async request<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
@@ -98,6 +99,7 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
         mutations++; name = (variables.input as { name: string }).name;
         return { updateProjectV2View: { projectV2View: { id: "V" } } } as T;
       }
+      if (query.includes("query ProjectViews")) beforeViewRead?.();
       return { repositoryOwner: { __typename: "Organization", projectV2: { id: variables.number === 2 ? "OTHER" : "PVT", number: variables.number,
         title: "Fixture", url: null, viewerCanUpdate: true, fields: conn([{ id: "F", name: "Title", dataType: "TEXT" }]),
         views: conn([{ id: "V", number: 1, name, layout: "TABLE_LAYOUT", filter: null,
@@ -184,6 +186,15 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
     assert.equal(mutations, 2); assert.equal(console.snapshot().plan, null);
     options.config.writeEnabled = true;
     assert.throws(() => console.selectProject("OTHER"), /PROJECT_SELECTION_REQUIRED/);
+    let currentRegistry = registry;
+    Object.assign(options, { auth: { registry: () => currentRegistry, teamStore: () => null } });
+    const freshPreview = await call("admin", "/api/v1/project/views/preview", { ...target, update: { viewId: "V", changes: { name: "Revoked during read" } } });
+    const freshPlan = (await freshPreview.json() as {data: {planId: string; planDigest: string}}).data;
+    let viewReads = 0;
+    beforeViewRead = () => { if (++viewReads === 2) currentRegistry = new OAuthIdentityRegistry([{ subject: "fixture-admin", accessCode: "synthetic-admin", role: "viewer", projectIds: ["PVT"] }]); };
+    const revoked = await call("admin", "/api/v1/write/views/update", { ...target, planId: freshPlan.planId, planDigest: freshPlan.planDigest, approved: true });
+    assert.equal(revoked.status, 200); assert.equal((await revoked.json() as {data: {state: string}}).data.state, "failed"); assert.equal(mutations, 2);
+    beforeViewRead = undefined; currentRegistry = registry; delete (options as {auth?: unknown}).auth;
     const countBeforeAclFailure = requests;
     process.env.M12_TEAM_ACL_MODE = "enforce";
     assert.equal((await call("admin", "/api/v1/project/catalog", {})).status, 503);
@@ -191,4 +202,14 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
   } finally {
     for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   }
+});
+
+test("public REST verifies current personal credential bindings and never accepts admin cookies as bearer",async(t)=>{
+  const env={PUBLIC_BASE_URL:"https://rest-binding.example.invalid",MCP_OAUTH_SIGNING_SECRET:"synthetic-rest-binding-key-never-issued-externally"};const old=new Map(Object.keys(env).map(k=>[k,process.env[k]]));Object.assign(process.env,env);t.after(()=>{for(const[k,v]of old){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
+  const record={subject:"user:rest",accessCode:"synthetic-rest-code",role:"admin" as const,projectIds:["PVT"]};let registry=new OAuthIdentityRegistry([record]);const now=Math.floor(Date.now()/1000);
+  const token=await signEnvelope("gypa",{typ:"access_token",sub:record.subject,aud:env.PUBLIC_BASE_URL+"/mcp",scope:"projects:read projects:write",iat:now,exp:now+60,identityVersion:registry.credentialVersion(record.subject,env.MCP_OAUTH_SIGNING_SECRET)});
+  const options={config:{githubToken:"synthetic-unused",allowedOwners:["fixture-org"],allowedProjectIds:["PVT"],writeEnabled:true},auth:{registry:()=>registry,teamStore:()=>null}};
+  const call=()=>handleRestApiRequest(new Request(env.PUBLIC_BASE_URL+"/api/v1/identity",{headers:{authorization:"Bearer "+token}}),options);
+  assert.equal((await call()).status,200);registry=new OAuthIdentityRegistry([{...record,accessCode:"rotated-synthetic-code"}]);assert.equal((await call()).status,401);
+  assert.equal((await handleRestApiRequest(new Request(env.PUBLIC_BASE_URL+"/api/v1/identity",{headers:{cookie:"__Host-gyp_admin_session="+"x".repeat(43)}}),options)).status,401);
 });

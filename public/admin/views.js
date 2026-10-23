@@ -1,7 +1,7 @@
 // Uses the existing REST identity/scope boundary. No token issuance or persistent browser storage.
 export function createViewConsole(fetcher = fetch, onChange = () => {}) {
-  const empty = () => ({ identity: null, projects: [], omittedProjectCount: 0, target: null, views: null, plan: null, result: null, busy: false, error: null });
-  let model = empty(), token = "", revision = 0;
+  const empty = () => ({ transport: "bearer", identity: null, projects: [], omittedProjectCount: 0, target: null, views: null, plan: null, result: null, busy: false, error: null });
+  let model = empty(), token = "", csrf = "", authMode = "bearer", revision = 0;
   const snapshot = () => structuredClone(model);
   const notify = () => onChange(snapshot());
   const failure = (code) => new Error(code);
@@ -11,22 +11,26 @@ export function createViewConsole(fetcher = fetch, onChange = () => {}) {
   };
   async function run(work) {
     if (model.busy) throw failure("CONSOLE_BUSY");
-    const current = revision, authorization = token;
+    const current = revision;
     model.busy = true; model.error = null; notify();
     const request = async (path, body, write = false) => {
+      if (current !== revision) throw failure("CONSOLE_STATE_CHANGED");
+      const session = authMode === "session", bootstrap = path === "/api/admin/v1/session" && body !== undefined;
+      const destination = session ? path.replace(/^\/api\/v1\//, "/api/admin/v1/") : path;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), write ? 120_000 : 20_000);
       try {
-        const response = await fetcher(path, {
-          method: body === undefined ? "GET" : "POST", credentials: "omit", cache: "no-store", redirect: "error",
-          headers: { Authorization: "Bearer " + authorization, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+        const response = await fetcher(destination, {
+          method: body === undefined ? "GET" : "POST", credentials: session || bootstrap ? "same-origin" : "omit", cache: "no-store", redirect: "error",
+          headers: { ...(session ? {} : { Authorization: "Bearer " + token }), ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+            ...(session && body !== undefined ? { "X-CSRF-Token": csrf } : {}) },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: controller.signal,
         });
         if (current !== revision) throw failure("CONSOLE_STATE_CHANGED");
         const payload = await response.json();
         if (current !== revision) throw failure("CONSOLE_STATE_CHANGED");
         if (!response.ok || payload.ok !== true) {
-          if (response.status === 401) { token = ""; model = empty(); }
+          if (response.status === 401 || (session && response.status === 403)) { token = ""; csrf = ""; authMode = "bearer"; model = empty(); }
           const code = payload.error?.code;
           throw failure(typeof code === "string" && /^[A-Z][A-Z0-9_]{0,99}$/.test(code) ? code : "CONSOLE_REQUEST_FAILED");
         }
@@ -58,27 +62,49 @@ export function createViewConsole(fetcher = fetch, onChange = () => {}) {
       return snapshot();
     });
   }
+  async function loadIdentity(request) {
+    const identity = await request("/api/v1/identity"), catalog = await request("/api/v1/project/catalog");
+    if (!identity.authenticated || !Array.isArray(catalog.projects) || catalog.projects.length > 100
+      || catalog.projects.some((p) => !p || typeof p.id !== "string" || !p.id || typeof p.owner !== "string" || !p.owner
+        || !Number.isSafeInteger(p.number) || p.number <= 0 || typeof p.title !== "string" || typeof p.canWriteViews !== "boolean")
+      || new Set(catalog.projects.map((p) => p.id)).size !== catalog.projects.length) throw failure("CONSOLE_IDENTITY_INVALID");
+    model.identity = identity; model.projects = catalog.projects; model.omittedProjectCount = catalog.omittedProjectCount;
+    model.transport = authMode;
+    return snapshot();
+  }
+  async function sessionConnection(presentedToken, resume) {
+    if (model.busy) throw failure("CONSOLE_BUSY");
+    revision++; const connecting = revision; model = empty(); token = resume ? "" : String(presentedToken).trim(); csrf = ""; authMode = resume ? "session" : "bearer";
+    if (!resume && (!token || token.length > 16_384 || /\s/.test(token))) { model.error = "CONSOLE_TOKEN_INVALID"; notify(); throw failure("CONSOLE_TOKEN_INVALID"); }
+    try {
+      return await run(async (request) => {
+        const data = await request("/api/admin/v1/session", resume ? undefined : {});
+        if (!data.authenticated || !/^[A-Za-z0-9_-]{43}$/.test(data.csrf)) throw failure("CONSOLE_SESSION_INVALID");
+        csrf = data.csrf; token = ""; authMode = "session";
+        return loadIdentity(request);
+      });
+    } catch (error) { if (connecting === revision) { token = ""; csrf = ""; authMode = "bearer"; model.identity = null; model.projects = []; notify(); } throw error; }
+  }
   return {
     snapshot,
     async connect(presentedToken) {
       if (model.busy) throw failure("CONSOLE_BUSY");
-      revision++; model = empty(); token = String(presentedToken).trim();
+      revision++; model = empty(); token = String(presentedToken).trim(); csrf = ""; authMode = "bearer";
       if (!token || token.length > 16_384 || /\s/.test(token)) { token = ""; model.error = "CONSOLE_TOKEN_INVALID"; notify(); throw failure("CONSOLE_TOKEN_INVALID"); }
       const connecting = revision;
       try {
-        return await run(async (request) => {
-          const identity = await request("/api/v1/identity");
-          const catalog = await request("/api/v1/project/catalog");
-          if (!identity.authenticated || !Array.isArray(catalog.projects) || catalog.projects.length > 100
-            || catalog.projects.some((p) => !p || typeof p.id !== "string" || !p.id || typeof p.owner !== "string" || !p.owner
-              || !Number.isSafeInteger(p.number) || p.number <= 0 || typeof p.title !== "string" || typeof p.canWriteViews !== "boolean")
-            || new Set(catalog.projects.map((p) => p.id)).size !== catalog.projects.length) throw failure("CONSOLE_IDENTITY_INVALID");
-          model.identity = identity; model.projects = catalog.projects; model.omittedProjectCount = catalog.omittedProjectCount;
-          return snapshot();
-        });
+        return await run(loadIdentity);
       } catch (error) { if (connecting === revision) { token = ""; model.identity = null; model.projects = []; notify(); } throw error; }
     },
-    disconnect() { revision++; token = ""; model = empty(); notify(); },
+    connectSession(presentedToken) { return sessionConnection(presentedToken, false); },
+    resumeSession() { return sessionConnection("", true); },
+    async logoutSession() {
+      if (authMode !== "session") throw failure("CONSOLE_SESSION_INVALID");
+      if (model.busy) throw failure("CONSOLE_BUSY");
+      try { return await run((request) => request("/api/admin/v1/logout", {})); }
+      finally { revision++; token = ""; csrf = ""; authMode = "bearer"; model = empty(); notify(); }
+    },
+    disconnect() { revision++; token = ""; csrf = ""; authMode = "bearer"; model = empty(); notify(); },
     selectProject(id) {
       if (model.busy) throw failure("CONSOLE_BUSY");
       const target = model.projects.find((p) => p.id === id);
@@ -124,6 +150,7 @@ export function mountViewConsole(document, fetcher = fetch, lifecycle = globalTh
     $("workspace").hidden = !state.identity;
     $("connection").hidden = !!state.identity;
     show("identity", state.identity ? (state.identity.displayName || state.identity.subject) + " · " + state.identity.role : "");
+    $("disconnect").textContent = state.transport === "session" ? "서버 세션 종료" : "연결 해제";
     const choices = $("project");
     choices.replaceChildren(option("", "Project 선택"), ...state.projects.map((p) => option(p.id, `${p.owner} #${p.number} · ${p.title}${p.canWriteViews ? "" : " (조회 전용)"}`)));
     choices.value = state.target?.id || "";
@@ -144,8 +171,9 @@ export function mountViewConsole(document, fetcher = fetch, lifecycle = globalTh
       : state.omittedProjectCount ? "접근할 수 없거나 서버 허용 범위를 벗어난 Project는 선택 목록에서 제외됐습니다." : "");
   }
   const action = (work) => async (event) => { event.preventDefault(); try { await work(); } catch (error) { show("status", `${error.message} · 현재 상태를 확인하세요.`); } };
-  $("connect").addEventListener("submit", action(async () => { const token = $("token").value; $("token").value = ""; await client.connect(token); }));
-  $("disconnect").addEventListener("click", action(() => client.disconnect()));
+  $("connect").addEventListener("submit", action(async () => { const token = $("token").value; $("token").value = ""; await ($("session-mode").checked ? client.connectSession(token) : client.connect(token)); }));
+  $("resume-session").addEventListener("click", action(() => client.resumeSession()));
+  $("disconnect").addEventListener("click", action(() => client.snapshot().transport === "session" ? client.logoutSession() : client.disconnect()));
   $("project").addEventListener("change", action(async () => { client.selectProject($("project").value); await client.loadViews(); }));
   $("refresh").addEventListener("click", action(() => client.loadViews()));
   $("preview-template").addEventListener("click", action(() => client.previewTemplate($("template").value)));

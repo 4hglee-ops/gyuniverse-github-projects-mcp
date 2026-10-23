@@ -287,12 +287,16 @@ function approvalPage(params: AuthorizationParams, error?: string): Response {
   );
 }
 
-function subjectForAccessCode(accessCode: string): string | null {
-  const identity = OAuthIdentityRegistry.fromEnvironment().resolveByAccessCode(accessCode);
-  if (identity) return identity.subject;
+function subjectForAccessCode(accessCode: string): { subject: string; identityVersion?: string } | null {
+  const registry = OAuthIdentityRegistry.fromEnvironment(), identity = registry.resolveByAccessCode(accessCode);
+  if (identity) {
+    const key = process.env.MCP_OAUTH_SIGNING_SECRET?.trim() ?? "";
+    // Preserve legacy weak-key deployments without silently upgrading their old tokens to session proofs.
+    return { subject: identity.subject, ...(key.length >= 32 ? { identityVersion: registry.credentialVersion(identity.subject, key)! } : {}) };
+  }
 
   const expectedTeamCode = oauthTeamCode();
-  if (expectedTeamCode && accessCode === expectedTeamCode) return LEGACY_TEAM_SUBJECT;
+  if (expectedTeamCode && accessCode === expectedTeamCode) return { subject: LEGACY_TEAM_SUBJECT };
   return null;
 }
 
@@ -331,7 +335,8 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
     redirectUri: parsed.params.redirectUri,
     resource: effectiveResource(parsed.params),
     scope: parsed.params.scope,
-    sub: subject,
+    sub: subject.subject,
+    ...(subject.identityVersion ? { identityVersion: subject.identityVersion } : {}),
     codeChallenge: parsed.params.codeChallenge,
     clientMode,
     iat: now,
@@ -386,6 +391,7 @@ async function issueTokens(
   clientId: string,
   subject: string,
   clientMode: OAuthClientMode,
+  identityVersion?: string,
 ): Promise<Response> {
   const now = nowSeconds();
   const accessPayload: AccessTokenPayload = {
@@ -393,6 +399,7 @@ async function issueTokens(
     aud: resource,
     scope,
     sub: subject,
+    ...(identityVersion ? { identityVersion } : {}),
     iat: now,
     exp: now + ACCESS_TOKEN_TTL_SECONDS,
   };
@@ -402,6 +409,7 @@ async function issueTokens(
     scope,
     clientId,
     sub: subject,
+    ...(identityVersion ? { identityVersion } : {}),
     clientMode,
     iat: now,
     exp: now + REFRESH_TOKEN_TTL_SECONDS,
@@ -458,11 +466,12 @@ async function handleAuthorizationCode(request: Request, form: FormData): Promis
     if (actualChallenge !== payload.codeChallenge) return tokenError("invalid_grant", "PKCE verification failed.");
   }
 
+  if (!currentIdentityVersion(payload.sub, payload.identityVersion)) return tokenError("invalid_grant", "Identity credential changed or was removed.");
   if (!(await authorizationCodeReplayStore.consume(code, payload.exp))) {
     return tokenError("invalid_grant", "Authorization code has already been used.");
   }
 
-  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub, mode);
+  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub, mode, payload.identityVersion);
 }
 
 async function handleRefreshToken(request: Request, form: FormData): Promise<Response> {
@@ -492,7 +501,15 @@ async function handleRefreshToken(request: Request, form: FormData): Promise<Res
     return tokenError("invalid_client", "Public PKCE clients must not use a client secret.", 401);
   }
 
-  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub, mode);
+  if (!currentIdentityVersion(payload.sub, payload.identityVersion)) return tokenError("invalid_grant", "Identity credential changed or was removed.");
+  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub, mode, payload.identityVersion);
+}
+
+function currentIdentityVersion(subject: string, version: string | undefined): boolean {
+  if (version === undefined) return true; // Legacy refreshes stay unversioned, never upgraded into a privileged proof.
+  if (!/^[A-Za-z0-9_-]{43}$/.test(version) || subject === LEGACY_TEAM_SUBJECT) return false;
+  try { return OAuthIdentityRegistry.fromEnvironment().credentialVersion(subject, process.env.MCP_OAUTH_SIGNING_SECRET?.trim() ?? "") === version; }
+  catch { return false; }
 }
 
 export async function tokenOAuth(request: Request): Promise<Response> {
