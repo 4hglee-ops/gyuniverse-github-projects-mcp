@@ -40,6 +40,15 @@
 | 실제 MCP 요청 통합 회귀 | 메모리 transport로 도구 목록, 합성 153개 항목·snapshot 조회, WBS preview, 권한 거부 확인 |
 | WBS 권한 회귀 | Viewer/Member, 전역 write gate, allowlist, Project별 field/write 권한 축소 시 거부 확인 |
 
+### 원격 검증 증거
+
+- [Draft PR #25](https://github.com/4hglee-ops/gyuniverse-github-projects-mcp/pull/25), 대상 `develop`, 미병합.
+- 코드 통합 커밋: `6d5958c655dfcdc48b8986ad1c79ed3545d359e7` (부모: `fb63ee4`, `10888e8`).
+- [GitHub CI](https://github.com/4hglee-ops/gyuniverse-github-projects-mcp/actions/runs/39923959339/job/120315677206): Node.js v22.23.3에서 타입 검사·빌드·307개 테스트 통과.
+- [전체 이력 Gitleaks](https://github.com/4hglee-ops/gyuniverse-github-projects-mcp/actions/runs/39923959399/job/120315677468): 통과.
+- [Vercel Preview](https://gyuniverse-github-projects-mcp-git-int-edb109-skn-34-2nd-5-team.vercel.app): GitHub Vercel 상태에서 배포 완료 확인. 실제 OAuth/관리자 로그인/Project API 검증 완료를 뜻하지 않는다.
+- 위 CI 링크는 코드 통합 커밋의 결과다. 이후 문서만 갱신한 커밋의 최신 CI는 PR Checks에서 별도 확인한다.
+
 153개는 테스트에서 생성한 합성 항목 수다. 실제 Project #3의 137개 T-* 작업/16개 상위 이슈/상세 필드/담당자/Status를 재조회해 검증했다는 의미가 아니다. GitHub, DB, Redis 및 Production의 데이터나 환경변수에 쓰지 않았다.
 
 ## 후속 단계와 위험
@@ -74,3 +83,50 @@
 - Preview·DB·Project 데이터 변경이 없어 현재 단계의 운영 데이터 롤백은 필요하지 않다. 검증 실패 시 PR을 미병합 상태로 두고 같은 통합 브랜치에서 수정한다.
 - 향후 병합 후 되돌려야 하면 실제 병합 방식과 커밋을 확인한 뒤 `develop` 대상 revert PR을 만든다. 보호 브랜치 reset/force-push는 사용하지 않는다.
 - 다음 단계의 파일 경로·내용·이유·영향을 설명하고 승인받은 뒤 해당 범위만 수정한다.
+
+## 2단계 제안 승인 범위: 공통 Project View API
+
+아래는 승인 요청을 위한 제안이며 아직 구현하지 않았다. 새 `codex/project-view-api` 브랜치를 검증된 통합 브랜치에서 만들고, `integration/mcp-views-admin` 대상 별도 Draft PR로 검토한다. #25나 #20을 자동 병합하지 않는다.
+
+목적은 Project #2에 고정된 기존 View 코드를 다른 허용 Project에서도 안전하게 사용하도록 하는 것이다. `list_project_views`, `preview_project_view_setup`, `apply_project_view_setup`, `update_project_view`를 MCP와 REST가 같은 Core로 호출하게 한다. 템플릿은 #2의 기존 보기와 #3의 WBS/Status/Part/내 작업/마감/Roadmap 구성을 지원 가능한 범위로 나눈다.
+
+쓰기 기능은 Admin 전용 Project별 capability, owner/Project allowlist, 기존 OAuth write scope·write gate를 모두 통과해야 한다. Preview는 외부 쓰기 없이 planId/digest/TTL을 발급하며, 명시적으로 승인된 계획만 현재 상태 재검증·동시 실행 방지·중복 생성 방지·재조회·감사를 거쳐 적용한다. 지원하지 않는 그룹·정렬 수정과 Roadmap 날짜 선택은 수동 항목으로 반환한다. 삭제 API는 노출하지 않는다.
+
+### 정확한 파일 경로와 변경 내용
+
+모든 경로는 현재 승인 요청의 대상이다. 이 표 밖의 추가 파일이 필요하면 먼저 알린다.
+
+| 절대 경로 | 생성/수정 내용과 이유 |
+| --- | --- |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\github\project-views.ts` | 공통 View 조회·페이지네이션, 공식 API 생성·부분 수정, REST 필드 ID 매핑 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\github\project-views.test.ts` | 요청 형식·페이지네이션·필드 ID·오류 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\views\project-view-service.ts` | ACL, preview/apply/update, 상태 재검증·부분 실패·감사 연결 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\views\project-view-service.test.ts` | 0 writes, 권한 거부, stale 계획, 충돌, 실패·재시도·재실행 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\views\view-plan.ts` | 불변 계획·digest·만료·지원/수동 항목 분류 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\views\view-plan.test.ts` | 계획 변조·만료·분류 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\views\view-plan-store.ts` | 로컬/Upstash 계획 저장과 원자적 상태 전환; 기존 Redis와 별도 namespace |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\views\view-plan-store.test.ts` | 재시작 보존 계약·동시 실행 거부·저장 실패 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\views\view-plan-store-factory.ts` | 기존 governance persistence 설정에 따른 저장소 구성 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\project-foundation\view-templates.ts` | 팀별 재사용 가능한 #2/#3 View 템플릿 정의 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\project-foundation\operating-foundation.ts` | 공통 View 조회·ID 매핑 재사용; 기존 #2 전용 CLI 경계 유지 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\project-foundation\operating-foundation.test.ts` | #2의 기존 계획·생성·재조회 동작 회귀 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\identity\principal.ts` | Admin 전용 View 쓰기 capability 추가; Viewer/Member의 기존 권한 유지 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\identity\principal.test.ts` | 역할 기본 권한과 override 축소 규칙 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\policy\write-policy.ts` | View 작업을 Project별 capability·기존 write gate에 연결 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\core\policy\write-policy.test.ts` | cross-team/cross-Project와 쓰기 권한 거부 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\mcp\project-view-tools.ts` | 네 가지 View 도구 등록 및 입력 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\mcp\project-view-tools.test.ts` | MCP 입력·Shared Core 호출·권한 경계 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\mcp\build-server.ts` | 공통 View 도구 구성 연결 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\http\rest-api.ts` | 인증된 View REST 경로를 같은 Core에 연결 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\http\rest-api.test.ts` | OAuth scope·ACL·REST/Core 동작 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\http\openapi.ts` | 새 경로·계획 승인·지원 제한의 API 계약 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\src\http\openapi.test.ts` | OpenAPI 경로·계약 검증 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\docs\PERMISSIONS.md` | View 권한·기존 팀 호환 설명 |
+| `D:\dev\03_PersonalProjects\gyuniverse-github-projects-mcp\docs\MCP_VIEWS_ADMIN_INTEGRATION_STATUS.md` | 구현·테스트·제한·PR·롤백 기록 갱신 |
+
+### 기존 기능에 미칠 수 있는 영향과 검증 범위
+
+- MCP 도구 목록과 REST/OpenAPI에 View 기능이 추가된다. Admin 기본 capability가 늘어나므로 기존에 명시적으로 축소한 capability와 팀별 교집합이 확장되지 않는지 검증한다.
+- Project #2 기존 CLI 동작을 보존하며, GitHub item/Issue/필드 옵션/Status 변경 API를 View 작업에서 호출하지 않는지 검증한다.
+- Upstash 사용 시 계획·동시 실행 상태만 별도 namespace에 기록하도록 구현한다. 기존 OAuth replay·bulk·감사 namespace와 DB 구조는 수정하지 않는다.
+- 이 단계의 승인은 위 파일의 코드 작성·합성 테스트·타입 검사·빌드·CI·별도 Draft PR 생성까지다. 실제 Project의 View 변경, DB migration 적용, 자격증명 변경, 관리자 #20 포팅, Production 활성화는 포함하지 않는다.
