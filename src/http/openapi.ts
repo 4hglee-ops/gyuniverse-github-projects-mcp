@@ -200,6 +200,12 @@ export function openApiDocument(baseUrl: string) {
     },
     servers: [{ url: base }],
     paths: {
+      "/api/v1/project/catalog": { get: {
+        operationId: "list_authorized_view_projects", summary: "Resolve allowed Project choices for the authenticated operator.",
+        description: "Returns only server owner/Project allowlists intersected with current identity and team read permissions. canWriteViews is advisory; every apply rechecks authorization.",
+        security: [{ oauth2: ["projects:read"] }],
+        responses: { "200": successResponse, "401": errorResponse, "503": errorResponse },
+      } },
       "/api/v1/project/views": { post: readOperation("list_project_views", "List complete authorized Project View configuration.", z.toJSONSchema(viewTargetSchema)) },
       "/api/v1/project/views/preview": { post: readOperation("preview_project_view_setup", "Persist a 15-minute immutable View template or update preview; no GitHub changes.",
         { ...z.toJSONSchema(viewPreviewSchema), oneOf: [{ required: ["template"] }, { required: ["update"] }] }) },
