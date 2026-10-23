@@ -29,6 +29,7 @@ import { GitHubRestClient } from "../github/rest-client.js";
 import { ProjectViewService } from "../core/views/project-view-service.js";
 import type { ViewPlanStore } from "../core/views/view-plan-store.js";
 import { viewApplySchema, viewPreviewSchema, viewTargetSchema } from "../core/views/view-plan.js";
+import { projectViewCatalog } from "../core/views/project-view-catalog.js";
 
 const projectInput = z.object({
   owner: z.string().min(1),
@@ -119,6 +120,7 @@ function errorCode(error: unknown): string {
 
 function statusForError(error: unknown): number {
   const code = errorCode(error);
+  if (code === "PROJECT_CATALOG_UNAVAILABLE") return 503;
   if (["VIEW_PLAN_STORE_UNAVAILABLE", "VIEW_PLAN_DURABILITY_REQUIRED", "VIEW_PLAN_STORE_FULL"].includes(code)) return 503;
   if (["VIEW_PLAN_STALE", "VIEW_PLAN_IN_PROGRESS", "VIEW_PLAN_MISMATCH", "VIEW_PLAN_EXPIRED", "VIEW_PLAN_BLOCKED"].includes(code)) return 409;
   if (code.startsWith("VIEW_UPSTREAM_")) return 502;
@@ -253,6 +255,10 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
   const itemReferences = new AuthorizedProjectItemReferenceResolver({ config, client, projects });
 
   try {
+    if (url.pathname === "/api/v1/project/catalog") {
+      if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });
+      return json({ ok: true, data: await projectViewCatalog(config, client, scopedPrincipal) });
+    }
     if (url.pathname === "/api/v1/identity") {
       if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });
       return json({ ok: true, data: identity.getContext() });

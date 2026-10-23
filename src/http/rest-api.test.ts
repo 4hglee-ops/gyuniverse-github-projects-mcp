@@ -84,7 +84,8 @@ test("unknown upstream failures allow at most one state-aware retry", () => {
 });
 
 test("REST View routes enforce scopes/roles and share stored Core plans across requests", async () => {
-  const vars = { PUBLIC_BASE_URL: "https://views.example.invalid", MCP_OAUTH_SIGNING_SECRET: "synthetic-view-test-secret-never-issued-externally", M12_TEAM_ACL_MODE: "legacy" };
+  const vars = { PUBLIC_BASE_URL: "https://views.example.invalid", MCP_OAUTH_SIGNING_SECRET: "synthetic-view-test-secret-never-issued-externally", M12_TEAM_ACL_MODE: "legacy",
+    M12_SUPABASE_URL: "", M12_SUPABASE_SERVICE_ROLE_KEY: "" };
   const previous = new Map(Object.keys(vars).map((key) => [key, process.env[key]]));
   for (const [key, value] of Object.entries(vars)) process.env[key] = value;
   let name = "Original", mutations = 0, requests = 0;
@@ -92,6 +93,7 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
   class Client extends GitHubGraphQlClient {
     override async request<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
       requests++;
+      if (query.includes("query ProjectViewCatalog")) return { nodes: [{ id: "PVT", owner: { login: "fixture-org" }, number: 3, title: "Fixture", viewerCanUpdate: true }] } as T;
       if (query.includes("mutation")) {
         mutations++; name = (variables.input as { name: string }).name;
         return { updateProjectV2View: { projectV2View: { id: "V" } } } as T;
@@ -115,11 +117,21 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
     // Offline synthetic bearer fixture only: no login, OAuth endpoint or live credential is used.
     const now = Math.floor(Date.now() / 1000);
     const token = await signEnvelope("gypa", { typ: "access_token", sub: "fixture-" + role, aud: vars.PUBLIC_BASE_URL + "/mcp", scope, iat: now, exp: now + 60 });
-    return handleRestApiRequest(new Request(vars.PUBLIC_BASE_URL + path, { method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer " + token }, body: JSON.stringify(body) }), options);
+    const method = path === "/api/v1/project/catalog" ? "GET" : "POST";
+    return handleRestApiRequest(new Request(vars.PUBLIC_BASE_URL + path, { method,
+      headers: { "content-type": "application/json", authorization: "Bearer " + token }, ...(method === "POST" ? { body: JSON.stringify(body) } : {}) }), options);
   };
   try {
     const target = { owner: "fixture-org", number: 3 };
+    for (const role of ["viewer", "member", "admin"] as const) {
+      const response = await call(role, "/api/v1/project/catalog", {});
+      assert.equal(response.status, 200);
+      const catalog = await response.json() as { data: { projects: Array<{ id: string; canWriteViews: boolean }> } };
+      assert.deepEqual(catalog.data.projects.map((p) => p.id), ["PVT"]);
+      assert.equal(catalog.data.projects[0]!.canWriteViews, role === "admin");
+    }
+    const readCatalog = await call("admin", "/api/v1/project/catalog", {}, "projects:read");
+    assert.equal((await readCatalog.json() as { data: { projects: Array<{ canWriteViews: boolean }> } }).data.projects[0]!.canWriteViews, false);
     assert.equal((await call("viewer", "/api/v1/project/views", target, "projects:read")).status, 200);
     const preview = await call("viewer", "/api/v1/project/views/preview", { ...target, update: { viewId: "V", changes: { name: "Renamed" } } }, "projects:read");
     assert.equal(preview.status, 200);
@@ -142,6 +154,40 @@ test("REST View routes enforce scopes/roles and share stored Core plans across r
     assert.equal((await call("admin", "/api/v1/project/views/preview", { ...target, update: { viewId: "V", changes: { sortBy: [] } } })).status, 400);
     assert.equal((await call("admin", "/api/v1/write/views/delete", input)).status, 404);
     assert.equal(mutations, 1);
+
+    // The actual browser controller calls the REST adapter and shared Core with an existing signed fixture.
+    // No real login/token endpoint, DB or GitHub connection is used.
+    const { createViewConsole } = await import(new URL("../../public/admin/views.js", import.meta.url).href);
+    const now = Math.floor(Date.now() / 1000);
+    const bearer = await signEnvelope("gypa", { typ: "access_token", sub: "fixture-admin", aud: vars.PUBLIC_BASE_URL + "/mcp",
+      scope: "projects:read projects:write", iat: now, exp: now + 60 });
+    let loseResponse = false;
+    const fetcher: typeof fetch = async (url, init) => {
+      const response = await handleRestApiRequest(new Request(new URL(String(url), vars.PUBLIC_BASE_URL), init), options);
+      if (loseResponse && String(url).startsWith("/api/v1/write/")) { loseResponse = false; throw new TypeError("synthetic response lost after Core completed"); }
+      return response;
+    };
+    const console = createViewConsole(fetcher);
+    await console.connect(bearer); console.selectProject("PVT"); await console.loadViews();
+    await console.previewUpdate("V", { name: "From View console" });
+    loseResponse = true;
+    await assert.rejects(() => console.apply(true), /CONSOLE_WRITE_OUTCOME_UNKNOWN/);
+    assert.equal(name, "From View console"); assert.equal(mutations, 2);
+    await assert.rejects(() => console.apply(true), /VIEW_PLAN_EXPIRED/);
+    await console.loadViews();
+    await console.previewUpdate("V", { name: "From View console" });
+    await console.apply(true); // Fresh preview is skip-compatible; no duplicate upstream mutation.
+    assert.equal(console.snapshot().result.state, "completed"); assert.equal(mutations, 2);
+    await console.previewUpdate("V", { name: "Must be denied after revocation" });
+    options.config.writeEnabled = false; // Advisory catalog permission must never replace current server authorization.
+    await assert.rejects(() => console.apply(true), /REST_REQUEST_FAILED/);
+    assert.equal(mutations, 2); assert.equal(console.snapshot().plan, null);
+    options.config.writeEnabled = true;
+    assert.throws(() => console.selectProject("OTHER"), /PROJECT_SELECTION_REQUIRED/);
+    const countBeforeAclFailure = requests;
+    process.env.M12_TEAM_ACL_MODE = "enforce";
+    assert.equal((await call("admin", "/api/v1/project/catalog", {})).status, 503);
+    assert.equal(requests, countBeforeAclFailure, "Unavailable enforced ACL must not fall back to legacy Project privileges");
   } finally {
     for (const [key, value] of previous) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   }

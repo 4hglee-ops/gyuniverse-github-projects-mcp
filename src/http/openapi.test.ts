@@ -6,6 +6,8 @@ import { handleRemoteHttpRequest } from "./router.js";
 
 test("OpenAPI View routes separate read preview from explicit approved writes without deletion", () => {
   const document = openApiDocument("https://example.test");
+  assert.deepEqual(document.paths["/api/v1/project/catalog"].get.security, [{ oauth2: ["projects:read"] }]);
+  assert.match(document.paths["/api/v1/project/catalog"].get.description, /every apply rechecks authorization/);
   for (const path of ["/api/v1/project/views", "/api/v1/project/views/preview"] as const) assert.deepEqual(document.paths[path].post.security, [{ oauth2: ["projects:read"] }]);
   for (const path of ["/api/v1/write/views/apply", "/api/v1/write/views/update"] as const) {
     const operation = document.paths[path].post;
