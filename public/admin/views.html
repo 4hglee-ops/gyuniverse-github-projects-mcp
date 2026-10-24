@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Gyuniverse · Project Views</title>
+  <meta name="referrer" content="no-referrer">
+  <link rel="stylesheet" href="./views.css"><script type="module" src="./views.js"></script>
+</head>
+<body>
+<header><p class="eyebrow">GYUNIVERSE · ADMIN WORKSPACE</p><h1>Project Views</h1>
+    <a href="/admin/index.html">사용자·키·감사 관리</a><p>현재 보기 확인 → 변경 계획 비교 → 명시적 승인 → 결과 확인</p></header>
+<main>
+  <section id="connection" class="panel">
+    <h2>기존 인증으로 연결</h2><p>이미 발급된 개인 OAuth 액세스 토큰을 사용합니다. 이 화면은 토큰을 발급하거나 브라우저 저장소에 보관하지 않습니다.</p>
+    <form id="connect"><label for="token">OAuth 액세스 토큰</label><input id="token" type="password" autocomplete="off" required spellcheck="false">
+      <label class="approval"><input id="session-mode" type="checkbox">Preview 관리자 세션 사용 (활성화된 환경의 개인 Admin만)</label><button type="submit">연결</button></form>
+    <button id="resume-session" type="button">기존 관리자 세션으로 연결</button>
+  </section>
+  <div id="workspace" hidden>
+    <section class="panel"><div class="row"><h2 id="identity"></h2><button id="disconnect" type="button">연결 해제</button></div>
+      <label for="project">허용된 Project</label><select id="project"></select><button id="refresh" type="button">현재 View 재조회</button>
+      <p>조회 전용 사용자는 계획까지 확인할 수 있습니다. 적용 시 서버가 현재 역할·Project 권한·쓰기 범위를 다시 확인합니다.</p></section>
+    <div class="grid">
+      <section class="panel"><h2>현재 View</h2><pre id="current"></pre></section>
+      <section class="panel"><h2>템플릿 계획</h2><label for="template">템플릿</label><select id="template"><option value="wbs-v1">WBS 구성</option><option value="operating-v1">운영 구성</option></select><button id="preview-template" type="button">변경 비교</button>
+        <h2>기존 View 부분 수정</h2><form id="update"><label for="view">View</label><select id="view"></select>
+          <label for="name">이름</label><input id="name" required maxlength="100"><label for="filter">필터</label><input id="filter" maxlength="1024">
+          <label for="layout">레이아웃</label><select id="layout"><option value="">현재 유지</option value="table">Table</option><option value="board">Board</option><option value="roadmap">Roadmap</option></select>
+          <button type="submit">수정 계획 비교</button></form>
+        <p>그룹·정렬 변경과 Roadmap 날짜, Parent issue 열은 GitHub UI에서 확인해야 합니다.</p></section>
+    </div>
+    <section class="panel"><h2>적용 전 계획</h2><pre id="plan"></pre><label class="approval"><input id="approve" type="checkbox">표시된 Project·계획·변경 내용을 확인하고 적용을 승인합니다.</label><button id="apply" type="button" disabled>승인한 계획 적용</button></section>
+    <section class="panel"><h2>검증 결과 · 수동 확인 항목</h2><pre id="result"></pre></section>
+  </div>
+  <p id="status" role="status" aria-live="polite"></p>
+</main>
+</body></html>

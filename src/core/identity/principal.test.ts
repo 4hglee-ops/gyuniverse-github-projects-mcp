@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { restrictPrincipalToTeamAccess } from "../teams/team-access.js";
 
 import {
   permissionsForRole,
@@ -49,4 +50,15 @@ test("an explicit permission snapshot can narrow role defaults without changing 
   assert.throws(() => principalForRole("viewer-expanded", "viewer", {
     projectIds: ["PVT_allowed"], permissions: ["project.read", "bulk.apply"],
   }), /may narrow but not expand/);
+});
+
+test("View writes are Admin-only and existing explicit/team permissions never widen", () => {
+  assert.equal(permissionsForRole("admin").includes("project.view.write"), true);
+  assert.equal(permissionsForRole("member").includes("project.view.write"), false);
+  assert.equal(permissionsForRole("viewer").includes("project.view.write"), false);
+  const admin = principalForRole("admin", "admin", { projectIds: ["PVT_A", "PVT_B"] });
+  const scoped = restrictPrincipalToTeamAccess(admin, { grants: [{ teamId: "team", resourceId: "resource", provider: "github_projects",
+    externalResourceId: "PVT_A", teamRole: "admin", grantRole: "admin", permissions: ["project.read", "project.write", "item.update_field"] }] });
+  assert.equal(scoped.resourcePermissions!.PVT_A!.includes("project.view.write"), false);
+  assert.deepEqual(scoped.projectIds, ["PVT_A"]);
 });

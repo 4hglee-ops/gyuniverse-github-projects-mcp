@@ -4,7 +4,8 @@ import { shouldUseLegacyJsonTransport, serveLegacyJsonTransport } from "./legacy
 
 import { type AppConfig, loadConfig } from "../config.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
-import { createTeamAccessStore, resolveTeamScopedPrincipal } from "../core/teams/team-access-runtime.js";
+import { resolveVerifiedOperator, operatorConfig, operatorViewWriteGuard, type OperatorAuthOptions } from "./operator-auth.js";
+import type { BuildServerOptions } from "../mcp/build-server.js";
 import {
   type AuthenticatedPrincipal,
   principalForRole,
@@ -69,6 +70,9 @@ export async function handleRemoteMcpRequest(
   options?: {
     config?: AppConfig;
     client?: GitHubGraphQlClient;
+    auth?: OperatorAuthOptions;
+    restClient?: BuildServerOptions["restClient"];
+    viewPlanStore?: BuildServerOptions["viewPlanStore"];
   },
 ): Promise<Response> {
   return traceMcpRequest(request, async (mark) => {
@@ -80,20 +84,20 @@ export async function handleRemoteMcpRequest(
   mark("oauth_verified");
 
   const baseConfig = options?.config ?? loadConfig();
-  const effectiveConfig = configForRemoteScope(baseConfig, access.scope);
-  const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
-  const legacyPrincipal = resolveRemotePrincipal(access.sub, effectiveConfig);
-  if (!legacyPrincipal) return unauthorized();
-  mark("principal_resolved");
-  let principal;
-  try {
-    principal = await resolveTeamScopedPrincipal(legacyPrincipal, createTeamAccessStore());
-  } catch {
-    return new Response("Authorization unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  const auth = { ...options?.auth, currentConfig: options?.auth?.currentConfig ?? (() => options?.config ?? loadConfig()) };
+  let operator;
+  try { operator = await resolveVerifiedOperator(presentedToken, baseConfig, auth); }
+  catch (error) {
+    if (error instanceof Error && error.message.startsWith("TEAM_ACL_UNAVAILABLE:"))
+      return new Response("Authorization unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+    return unauthorized();
   }
-
-  mark("acl_resolved");
-  const factory = () => buildMcpServer({ config: effectiveConfig, client, principal });
+  mark("principal_resolved"); mark("acl_resolved");
+  const effectiveConfig = operatorConfig(operator), principal = operator.principal;
+  const client = options?.client ?? new GitHubGraphQlClient(effectiveConfig.githubToken);
+  const assertCurrentWrite = operatorViewWriteGuard(operator, auth);
+  const factory = () => buildMcpServer({ config: effectiveConfig, client, principal, assertCurrentWrite,
+    restClient: options?.restClient, viewPlanStore: options?.viewPlanStore });
   mark("sdk_dispatch");
   if (await shouldUseLegacyJsonTransport(request)) {
     return serveLegacyJsonTransport(request, factory);

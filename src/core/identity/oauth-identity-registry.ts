@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import {
   permissionsForRole,
   principalForRole,
@@ -55,6 +56,15 @@ function normalizeRecord(value: unknown): OAuthIdentityRecord {
   };
 }
 
+function identityRecordsFromEnvironment(name: string): unknown[] {
+  const raw = process.env[name]?.trim();
+  if (!raw) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new Error(`${name} must be valid JSON.`); }
+  if (!Array.isArray(parsed)) throw new Error(`${name} must be a JSON array.`);
+  return parsed;
+}
+
 export class OAuthIdentityRegistry {
   private readonly records: OAuthIdentityRecord[];
 
@@ -71,12 +81,10 @@ export class OAuthIdentityRegistry {
   }
 
   static fromEnvironment(): OAuthIdentityRegistry {
-    const raw = process.env.MCP_OAUTH_IDENTITIES_JSON?.trim();
-    if (!raw) return new OAuthIdentityRegistry([]);
-    let parsed: unknown;
-    try { parsed = JSON.parse(raw); } catch { throw new Error("MCP_OAUTH_IDENTITIES_JSON must be valid JSON."); }
-    if (!Array.isArray(parsed)) throw new Error("MCP_OAUTH_IDENTITIES_JSON must be a JSON array.");
-    return new OAuthIdentityRegistry(parsed.map(normalizeRecord));
+    return new OAuthIdentityRegistry([
+      ...identityRecordsFromEnvironment("MCP_OAUTH_IDENTITIES_JSON"),
+      ...identityRecordsFromEnvironment("MCP_OAUTH_ADDITIONAL_IDENTITIES_JSON"),
+    ].map(normalizeRecord));
   }
 
   resolveByAccessCode(accessCode: string): OAuthIdentityRecord | null {
@@ -95,5 +103,12 @@ export class OAuthIdentityRegistry {
       projectIds: record.projectIds,
       permissions: record.permissions,
     });
+  }
+
+  /** Server-keyed binding only; never expose a raw access code or its unkeyed hash. */
+  credentialVersion(subject: string, serverKey: string): string | null {
+    if (serverKey.length < 32) throw new Error("OPERATOR_BINDING_CONFIG_INVALID: A server binding key is required.");
+    const record = this.records.find((item) => item.subject === subject);
+    return record ? createHmac("sha256", serverKey).update(JSON.stringify(["operator-identity-v1", record.subject, record.accessCode])).digest("base64url") : null;
   }
 }

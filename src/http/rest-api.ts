@@ -6,7 +6,7 @@ import type { BulkPlanStoreLike } from "../core/bulk/bulk-plan-store.js";
 import { createM10GovernanceServices } from "../core/governance/m10-services.js";
 import { IdentityContextService } from "../core/identity/identity-context-service.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
-import { createTeamAccessStore, resolveTeamScopedPrincipal } from "../core/teams/team-access-runtime.js";
+import { resolveVerifiedOperator, operatorConfig, operatorViewWriteGuard, type OperatorAuthOptions } from "./operator-auth.js";
 import { WritePolicy } from "../core/policy/write-policy.js";
 import { AuthorizedProjectItemReferenceResolver } from "../core/projects/project-item-reference-resolver.js";
 import { ProjectService } from "../core/projects/project-service.js";
@@ -24,7 +24,11 @@ import {
   OAUTH_WRITE_SCOPE,
   scopeIncludes,
 } from "../oauth/stateless.js";
-import { configForRemoteScope, resolveRemotePrincipal } from "./remote-mcp.js";
+import { GitHubRestClient } from "../github/rest-client.js";
+import { ProjectViewService } from "../core/views/project-view-service.js";
+import type { ViewPlanStore } from "../core/views/view-plan-store.js";
+import { viewApplySchema, viewPreviewSchema, viewTargetSchema } from "../core/views/view-plan.js";
+import { projectViewCatalog } from "../core/views/project-view-catalog.js";
 
 const projectInput = z.object({
   owner: z.string().min(1),
@@ -92,6 +96,9 @@ export interface RestApiRuntimeOptions {
   identityRegistry?: OAuthIdentityRegistry;
   auditService?: AuditService;
   bulkStore?: BulkPlanStoreLike;
+  restClient?: GitHubRestClient;
+  viewPlanStore?: ViewPlanStore;
+  auth?: OperatorAuthOptions;
 }
 
 export function restPathRequiresWrite(pathname: string): boolean {
@@ -113,6 +120,10 @@ function errorCode(error: unknown): string {
 
 function statusForError(error: unknown): number {
   const code = errorCode(error);
+  if (code === "PROJECT_CATALOG_UNAVAILABLE") return 503;
+  if (["VIEW_PLAN_STORE_UNAVAILABLE", "VIEW_PLAN_DURABILITY_REQUIRED", "VIEW_PLAN_STORE_FULL"].includes(code)) return 503;
+  if (["VIEW_PLAN_STALE", "VIEW_PLAN_IN_PROGRESS", "VIEW_PLAN_MISMATCH", "VIEW_PLAN_EXPIRED", "VIEW_PLAN_BLOCKED"].includes(code)) return 409;
+  if (code.startsWith("VIEW_UPSTREAM_")) return 502;
   if (["PERMISSION_DENIED", "CAPABILITY_REQUIRED", "IDENTITY_REQUIRED", "PROJECT_MEMBERSHIP_DENIED", "PROJECT_WRITE_NOT_ALLOWED"].includes(code)) return 403;
   return 400;
 }
@@ -124,6 +135,9 @@ interface ActionErrorAdvice {
 }
 
 export function actionErrorAdvice(code: string): ActionErrorAdvice {
+  if (code.startsWith("VIEW_")) {
+    return { category: "conflict", retryable: false, userAction: "Read current Views and plan results. Resolve manual items or uncertain locks before creating a new preview; never blindly retry a write." };
+  }
   if (code === "UNAUTHORIZED") {
     return { category: "authentication", retryable: false, userAction: "Reconnect or re-authorize the action with a valid OAuth session." };
   }
@@ -197,20 +211,16 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
   if (restPathRequiresWrite(url.pathname) && !scopeIncludes(access.scope, OAUTH_WRITE_SCOPE)) return writeScopeRequired();
 
   const baseConfig = options.config ?? loadConfig();
-  const config = configForRemoteScope(baseConfig, access.scope);
-  const principal = resolveRemotePrincipal(
-    access.sub,
-    config,
-    options.identityRegistry ?? OAuthIdentityRegistry.fromEnvironment(),
-  );
-  if (!principal) return unauthorized();
-  let scopedPrincipal;
-  try {
-    scopedPrincipal = await resolveTeamScopedPrincipal(principal, createTeamAccessStore());
-  } catch {
-    return json(errorPayload("TEAM_ACL_UNAVAILABLE", "Project authorization is temporarily unavailable."), 503);
+  const auth = { ...options.auth, registry: options.auth?.registry ?? (() => options.identityRegistry ?? OAuthIdentityRegistry.fromEnvironment()),
+    currentConfig: options.auth?.currentConfig ?? (() => options.config ?? loadConfig()) };
+  let operator;
+  try { operator = await resolveVerifiedOperator(token, baseConfig, auth); }
+  catch (error) {
+    if (errorCode(error) === "TEAM_ACL_UNAVAILABLE") return json(errorPayload("TEAM_ACL_UNAVAILABLE", "Project authorization is temporarily unavailable."), 503);
+    return unauthorized();
   }
-  if (!scopedPrincipal) return unauthorized();
+  const config = operatorConfig(operator), scopedPrincipal = operator.principal;
+  const assertCurrentWrite = operatorViewWriteGuard(operator, auth);
 
   const client = options.client ?? new GitHubGraphQlClient(config.githubToken);
   const projects = new ProjectService({ config, client, principal: scopedPrincipal });
@@ -241,6 +251,10 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
   const itemReferences = new AuthorizedProjectItemReferenceResolver({ config, client, projects });
 
   try {
+    if (url.pathname === "/api/v1/project/catalog") {
+      if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });
+      return json({ ok: true, data: await projectViewCatalog(config, client, scopedPrincipal) });
+    }
     if (url.pathname === "/api/v1/identity") {
       if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });
       return json({ ok: true, data: identity.getContext() });
@@ -248,6 +262,17 @@ export async function handleRestApiRequest(request: Request, options: RestApiRun
 
     if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     const body = await requestBody(request);
+
+    if (["/api/v1/project/views", "/api/v1/project/views/preview", "/api/v1/write/views/apply", "/api/v1/write/views/update"].includes(url.pathname)) {
+      const views = new ProjectViewService({ config, client, rest: options.restClient ?? new GitHubRestClient(config.githubToken),
+        principal: scopedPrincipal, projects, audit: auditService, store: options.viewPlanStore, assertCurrentWrite });
+      if (url.pathname === "/api/v1/project/views") {
+        const input = viewTargetSchema.parse(body);
+        return json({ ok: true, data: await views.list(input.owner, input.number) });
+      }
+      if (url.pathname === "/api/v1/project/views/preview") return json({ ok: true, data: await views.preview(viewPreviewSchema.parse(body)) });
+      return json({ ok: true, data: await views.apply(viewApplySchema.parse(body), url.pathname.endsWith("/update") ? "update" : "template") });
+    }
 
     if (url.pathname === "/api/v1/project/brief") {
       const input = projectInput.parse(body);

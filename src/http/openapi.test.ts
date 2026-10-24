@@ -4,6 +4,22 @@ import test from "node:test";
 import { openApiDocument } from "./openapi.js";
 import { handleRemoteHttpRequest } from "./router.js";
 
+test("OpenAPI View routes separate read preview from explicit approved writes without deletion", () => {
+  const document = openApiDocument("https://example.test");
+  assert.deepEqual(document.paths["/api/v1/project/catalog"].get.security, [{ oauth2: ["projects:read"] }]);
+  assert.match(document.paths["/api/v1/project/catalog"].get.description, /every apply rechecks authorization/);
+  for (const path of ["/api/v1/project/views", "/api/v1/project/views/preview"] as const) assert.deepEqual(document.paths[path].post.security, [{ oauth2: ["projects:read"] }]);
+  for (const path of ["/api/v1/write/views/apply", "/api/v1/write/views/update"] as const) {
+    const operation = document.paths[path].post;
+    assert.deepEqual(operation.security, [{ oauth2: ["projects:read", "projects:write"] }]);
+    const schema = operation.requestBody.content["application/json"].schema as { required: string[]; properties: Record<string, { const?: boolean }> };
+    for (const key of ["owner", "number", "planId", "planDigest", "approved"]) assert.ok(schema.required.includes(key), key);
+    assert.equal(schema.properties.approved!.const, true);
+  }
+  assert.ok(!Object.keys(document.paths).some((p) => p.includes("views/delete")));
+  assert.match(document.paths["/api/v1/write/views/update"].post.description, /Group\/sort\/Roadmap dates require GitHub UI/);
+});
+
 test("OpenAPI advertises semantic read and write endpoints with OAuth scopes", () => {
   const document = openApiDocument("https://example.test");
   assert.equal(document.openapi, "3.1.0");

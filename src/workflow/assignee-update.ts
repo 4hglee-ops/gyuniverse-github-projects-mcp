@@ -40,7 +40,7 @@ interface UserEnvelope {
 
 interface MutationEnvelope {
   addAssigneesToAssignable?: {
-    assignable?: { id?: string | null } | null;
+    clientMutationId?: string | null;
   } | null;
 }
 
@@ -188,7 +188,7 @@ export async function assignProjectWorkItem(
   await client.request<MutationEnvelope>(
     `mutation($assignableId: ID!, $assigneeIds: [ID!]!) {
       addAssigneesToAssignable(input: { assignableId: $assignableId, assigneeIds: $assigneeIds }) {
-        assignable { id }
+        clientMutationId
       }
     }`,
     { assignableId: beforeContext.assignableId, assigneeIds: [requestedAssignee.id] },

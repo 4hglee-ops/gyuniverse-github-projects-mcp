@@ -10,6 +10,7 @@ import { openApiDocument } from "./openapi.js";
 import { handleRemoteMcpRequest } from "./remote-mcp.js";
 import { handlePreviewMcpProbe, previewMcpProbeEnabled } from "./preview-mcp-probe.js";
 import { handleRestApiRequest } from "./rest-api.js";
+import { handleAdminRequest } from "../admin/console.js";
 
 function metadataResponse(value: Record<string, unknown>): Response {
   return Response.json(value, {
@@ -51,6 +52,7 @@ async function logOAuthScopeDiagnostic(request: Request): Promise<void> {
 
 export async function handleRemoteHttpRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/admin/v1/")) return handleAdminRequest(request);
 
   if (url.pathname === "/.well-known/oauth-protected-resource") {
     if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405 });

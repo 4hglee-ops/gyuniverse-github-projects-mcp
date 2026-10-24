@@ -20,6 +20,8 @@ export interface RegisteredClientPayload {
 export type OAuthClientMode = "public_pkce" | "gpt_actions_confidential";
 
 export interface AuthorizationCodePayload {
+  identityVersion?: string;
+  credentialId?: string;
   typ: "authorization_code";
   clientId: string;
   redirectUri: string;
@@ -33,6 +35,8 @@ export interface AuthorizationCodePayload {
 }
 
 export interface AccessTokenPayload {
+  identityVersion?: string;
+  credentialId?: string;
   typ: "access_token";
   aud: string;
   scope: string;
@@ -42,6 +46,9 @@ export interface AccessTokenPayload {
 }
 
 export interface RefreshTokenPayload {
+  jti?: string;
+  identityVersion?: string;
+  credentialId?: string;
   typ: "refresh_token";
   aud: string;
   scope: string;
@@ -140,23 +147,20 @@ export async function signEnvelope(prefix: string, payload: object): Promise<str
 }
 
 export async function verifyEnvelope<T>(token: string, prefix: string): Promise<T | null> {
-  const [actualPrefix, body, signature] = token.split(".");
-  if (actualPrefix !== prefix || !body || !signature) return null;
-  const key = await hmacKey();
-  if (!key) return null;
-  const message = `${actualPrefix}.${body}`;
-  const valid = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    base64UrlToBytes(signature),
-    encoder.encode(message),
-  );
-  if (!valid) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [actualPrefix, body, signature] = parts;
+  if (actualPrefix !== prefix || !body || !signature || !/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]+$/.test(signature)) return null;
   try {
-    return JSON.parse(decoder.decode(base64UrlToBytes(body))) as T;
-  } catch {
-    return null;
-  }
+    const bodyBytes = base64UrlToBytes(body), signatureBytes = base64UrlToBytes(signature);
+    // One signed token has one representation; replay keys cannot vary by trailing segments or base64 aliases.
+    if (bytesToBase64Url(bodyBytes) !== body || bytesToBase64Url(signatureBytes) !== signature) return null;
+    const key = await hmacKey();
+    if (!key) return null;
+    const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, encoder.encode(`${actualPrefix}.${body}`));
+    if (!valid) return null;
+    return JSON.parse(decoder.decode(bodyBytes)) as T;
+  } catch { return null; }
 }
 
 export async function sha256Base64Url(value: string): Promise<string> {

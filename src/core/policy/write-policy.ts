@@ -14,6 +14,8 @@ export type WriteOperation =
   | "capture_backlog"
   | "create_work_item"
   | "update_project_item_field"
+  | "configure_project_fields"
+  | "configure_project_views"
   | "update_status"
   | "update_priority"
   | "add_sub_issue"
@@ -30,6 +32,8 @@ const OPERATION_PERMISSION: Record<WriteOperation, ProjectPermission> = {
   capture_backlog: "item.add",
   create_work_item: "item.create",
   update_project_item_field: "item.update_field",
+  configure_project_fields: "item.update_field",
+  configure_project_views: "project.view.write",
   update_status: "item.update_status",
   update_priority: "item.update_priority",
   add_sub_issue: "item.relationship.write",
@@ -78,7 +82,7 @@ export class WritePolicy {
   authorize(request: WritePolicyRequest): WritePolicyDecision {
     assertProjectWriteAllowed(this.config, request.projectId);
     const permission = permissionForWriteOperation(request.operation);
-    if (permission === "item.relationship.write" || permission.startsWith("bulk.")) {
+    if (permission === "item.relationship.write" || permission === "project.view.write" || permission.startsWith("bulk.")) {
       this.identity.assertPermission(this.principal, permission);
     }
 
