@@ -1,4 +1,4 @@
-# 관리자 콘솔 Preview — 미게시 코드 및 합성 검증
+# 관리자 콘솔 Preview — 코드 및 합성 검증
 
 이 문서는 PR #20의 전체 적용 완료를 선언하지 않는다. 전용 Supabase `xdeygntepdjhwdiropwr`는 이전 INACTIVE 확인 이후 재개/연결하지 않았다. migration 004의 존재와 과거 문서 문구는 실제 적용 증거가 아니며 PR 설명과의 불일치가 남아 있다. 운영 migration history/schema를 확인하기 전 적용됐다고 가정하지 않는다.
 
@@ -27,8 +27,8 @@
 | 관리자 로그인·세션·logout | 개인 OAuth 신원 바인딩 방식으로 대체, 폐기 가능한 공유 세션 adapter 및 CSRF/TTL/회전 | 개인 로그인/토큰 발급 및 실제 Redis 미검증 |
 | 공유 관리자 비밀번호 | 단독 권한 부여 방식을 포팅하지 않음 | 새 비밀번호/secret 설정 없음 |
 | 사용자 생성·역할/Project/활성 metadata 변경 | 모의 adapter, 전체 범위·별도 권한·버전/중복 검사 및 UI | DB 사용자 생성/ACL grant/실제 권한 변경 없음 |
-| 키 발급·폐기·최초 1회 표시 | 합성 키 전용 adapter/UI, 응답 유실·재호출 원문 비노출 | 실제 자격증명 발급/폐기 및 DB transaction 미구현 |
-| 관리 감사 화면 | 검증된 actor와 전체 Project 범위로 필터링된 모의 감사, mutation과 double transaction | 실제 DB 감사/RPC transaction 미검증 |
+| 키 발급·폐기·최초 1회 표시 | 합성 키 전용 adapter/UI, 응답 유실·재호출 원문 비노출 | 실제 자격증명 발급/폐기 미연결. 아래 발급 SQL 초안만 격리 transaction 검증 |
+| 관리 감사 화면 | 검증된 actor와 전체 Project 범위로 필터링된 모의 감사, mutation과 double transaction | 실제 서비스 DB 미연결. 아래 발급 초안의 감사/RPC transaction만 격리 검증 |
 | managed credential OAuth code/refresh | 현재 subject+credentialId 검증 주입 계약은 있음. DB resolver/발급 경로 연결은 미구현 | migration/credential-team 연결/실제 OAuth 검증 필요 |
 | View 화면·공통 Core 연결 | BFF/public MCP/REST 연결, 최신 권한 hook 및 실패/중복 방지 | 실제 GitHub View 시각 결과 미검증 |
 | 정적 자산/CSP/모바일 | 외부 JS/CSS, textContent, 브라우저 저장소 미사용 | 로컬 Chromium 검증만, Vercel edge/보호 계층 미검증 |
@@ -40,4 +40,19 @@
 
 mutation+감사+operation receipt를 같은 transaction에 넣고, 동시/응답 유실 재호출에는 키 원문을 복구하거나 다시 발급하지 않아야 한다. 만료·폐기·역할/범위 변경 중 토큰 교환/갱신/기존 세션이 거부되는지 실제 SQL 엔진과 폐기 가능한 테스트 환경에서 검증해야 한다. 순수 코드 단계에서는 wire DTO와 주입 계약을 구체화할 수 있지만, 실제 권한 부여는 그 계약의 검증을 대신하지 못한다.
 
-DB 재개·migration 실행, 실제 OAuth 로그인/토큰·키 발급, 자격증명 설정, 사용자/역할·grant 변경, 실제 View 변경 및 배포는 별도 승인 후에만 진행한다. 현 실행은 이를 하지 않았다. 상세 파일/검증 기록은 `MCP_VIEWS_ADMIN_INTEGRATION_STATUS.md`와 `/tmp/gyuniverse-admin-management-validation/`를 참조한다.
+DB 재개·migration 실행, 실제 OAuth 로그인/토큰·키 발급, 자격증명 설정, 사용자/역할·grant 변경, 실제 View 변경 및 배포는 별도 승인 후에만 진행한다. 현 실행은 이를 하지 않았다. 상세 파일/검증 기록은 `MCP_VIEWS_ADMIN_INTEGRATION_STATUS.md`와 아래 workspace 검증 기록을 참조한다. 과거 `/tmp/gyuniverse-admin-management-validation/` 자료는 환경 재시작 후 보존되지 않았다.
+
+
+## 키 발급 scoped RPC 전진 초안 — 운영 미적용
+
+이번 보강은 키 발급 한 경로에 한정한다. `docs/drafts/admin-scoped-credential-issue-forward.sql`은 기존 001/002/004가 확인된 환경을 전제로 하는 검토 초안이며 기존 migration을 덮어쓰지 않는다. Supabase CLI가 없어 timestamped migration으로 등록하지 않았다. 실제 DB 적용/이력 확인은 미실행이다.
+
+제품 `ScopedCredentialRpc`는 server-injected transport·현재 개인 proof/ACL·서버 lease를 요구하고 기본 disabled/Preview only다. router/console에는 설치하지 않았으며 실제 자격증명 생성기·DB HTTP factory·lease 등록/폐기 API도 추가하지 않았다. candidate hash와 metadata만 다루며 원문을 생성/저장/반환하지 않는다. 새 SQL authority/lease에는 enrollment 기본 데이터가 없고 authority는 기본 inactive다.
+
+SQL 초안은 부모 user row lock/credential_generation 갱신 trigger로 기존 004의 COUNT→INSERT 경합과 stale REPEATABLE READ를 막고, metadata 변경 시 version을 갱신한다. 기존 비범위 발급 RPC의 backend execute를 회수하므로 실제 적용은 전환 계획 검토 전에는 금지한다. scoped RPC는 READ COMMITTED만 허용한다. 권한·lease·M12 변경 statement trigger와 발급 RPC가 같은 transaction advisory gate를 사용하므로 service_role에 M12/authority write 권한을 추가하지 않고 DB 안에서 최종 판정한다. 이 관리 gate는 coarse lock으로 처리량에 한계가 있으며 모든 후속 변경 경로의 lock order(관리 gate→target user row)를 유지해야 한다. 임의 외부 row-lock 순서·DB admin의 trigger 우회까지 보장하지 않는다.
+
+서버 attestation→SQL 현재 authority/binding/lease/authEpoch→현재 principal/team/resource/provider/capability 및 전체 target scope→expectedVersion/operationId→키 insert+개인 actor 감사+불변 scope receipt를 한 transaction에서 검증한다. managed actor는 현재 DB 사용자 범위와 키의 발급 당시 역할·Project 범위를 추가로 교차 검증한다. 과거 키의 immutable 발급 범위가 비어 있으면 자동 승격하지 않고 거부한다. 원본·lease·managed credential 만료도 반환 직전 다시 확인하며 실패하면 쓰기 전체가 rollback된다. DB lease/authEpoch가 관리 쓰기의 최종 철회 기준이며 Redis logout과 SQL commit의 분산 원자성을 주장하지 않는다. ENV binding/역할 변경과 DB epoch 동기화, lease provisioning/logout protocol은 아직 미구현이다.
+
+`admin-credential-rpc-engine.mjs`는 캐시된 공식 Postgres 17.11 amd64 digest만 사용해 network none/port 비공개/tmpfs 합성 환경에서 정확히 이 SQL 초안과 제품 TS adapter를 psql bridge로 연결해 검증한다. 이전 계약 모형과 달리 제품 SQL/adapter 코드가 연결됐지만 실제 PostgREST·Supabase/RLS deployment·관리형 OAuth·HTTP UI 연결까지 검증된 것은 아니다. 합성 managed-source 성공/metadata-only replay와 폐기·만료·잘못된 사용자 연결·역할/범위 축소 거부도 SQL 엔진에서 검증했다. managed 신원 resolver는 모의 응답이므로 실제 DB OAuth resolver 검증을 대신하지 않는다.
+
+합성 lease 등록/폐기는 임시 DB owner fixture로만 수행하며 backend의 직접 lease 쓰기는 거부한다. 미등록·다른 actor lease·폐기 후 재호출·15분 초과·ENV proof/DB authority/lease epoch 불일치를 거부하고, 명시적으로 합성 epoch를 맞췄을 때의 정상 경로도 검증했다. 운영 등록/폐기 API나 자동 epoch 복구는 없다. 현재 전체 코드 테스트 430/430(신규 8), 실제 PostgreSQL 17.11 검증 22개 그룹, 일반/Vercel 타입·빌드 검사를 통과했다. 테스트 종료 후 임시 컨테이너/합성 데이터는 제거하고 이미지는 보존했다. 실제 운영 credential provisioning·lease lifecycle·ENV epoch 동기화·HTTP/PostgREST는 후속 구현 및 별도 연동 검증이 필요하다. 증거는 `/workspace/gyuniverse-product-rpc-validation-20261024/`에 보존한다.
