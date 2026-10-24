@@ -1,3 +1,4 @@
+import { managedAccessCode, managedOAuthEnabled, validateManagedBinding, type ManagedOAuthRuntime, type ManagedBinding } from "./managed-identity.js";
 import { OAuthIdentityRegistry } from "../core/identity/oauth-identity-registry.js";
 import {
   ACCESS_TOKEN_TTL_SECONDS,
@@ -287,7 +288,7 @@ function approvalPage(params: AuthorizationParams, error?: string): Response {
   );
 }
 
-function subjectForAccessCode(accessCode: string): { subject: string; identityVersion?: string } | null {
+async function subjectForAccessCode(accessCode: string, managed?: ManagedOAuthRuntime): Promise<{ subject: string; identityVersion?: string; credentialId?: string } | null> {
   const registry = OAuthIdentityRegistry.fromEnvironment(), identity = registry.resolveByAccessCode(accessCode);
   if (identity) {
     const key = process.env.MCP_OAUTH_SIGNING_SECRET?.trim() ?? "";
@@ -295,12 +296,14 @@ function subjectForAccessCode(accessCode: string): { subject: string; identityVe
     return { subject: identity.subject, ...(key.length >= 32 ? { identityVersion: registry.credentialVersion(identity.subject, key)! } : {}) };
   }
 
+  const binding = await managedAccessCode(accessCode, managed);
+  if (binding) return { subject: binding.subject, credentialId: binding.credentialId };
   const expectedTeamCode = oauthTeamCode();
   if (expectedTeamCode && accessCode === expectedTeamCode) return { subject: LEGACY_TEAM_SUBJECT };
   return null;
 }
 
-export async function authorizeOAuth(request: Request): Promise<Response> {
+export async function authorizeOAuth(request: Request, managed?: ManagedOAuthRuntime): Promise<Response> {
   if (request.method === "GET") {
     const params = paramsFromUrl(new URL(request.url));
     const error = await validateAuthorization(params);
@@ -320,7 +323,9 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
   const error = await validateAuthorization(parsed.params);
   if (error) return new Response(error, { status: 400 });
 
-  const subject = subjectForAccessCode(parsed.accessCode);
+  let subject;
+  try { subject = await subjectForAccessCode(parsed.accessCode, managed); }
+  catch { return noStoreJson({ error: "temporarily_unavailable" }, { status: 503 }); }
   if (!subject) {
     return approvalPage(parsed.params, "접근 코드가 올바르지 않습니다.");
   }
@@ -337,6 +342,7 @@ export async function authorizeOAuth(request: Request): Promise<Response> {
     scope: parsed.params.scope,
     sub: subject.subject,
     ...(subject.identityVersion ? { identityVersion: subject.identityVersion } : {}),
+    ...(subject.credentialId ? { credentialId: subject.credentialId } : {}),
     codeChallenge: parsed.params.codeChallenge,
     clientMode,
     iat: now,
@@ -392,7 +398,15 @@ async function issueTokens(
   subject: string,
   clientMode: OAuthClientMode,
   identityVersion?: string,
+  credentialId?: string,
+  managed?: ManagedOAuthRuntime,
 ): Promise<Response> {
+  let binding: ManagedBinding | null = null;
+  if (subject.startsWith("user:managed:")) {
+    try { binding = await liveManaged(subject, credentialId, identityVersion, managed); } catch { return tokenError("temporarily_unavailable", "Current managed identity is unavailable.", 503); }
+    if (!binding) return tokenError("invalid_grant", "Managed credential is unavailable.");
+    if (!binding.canWrite) scope = OAUTH_READ_SCOPE;
+  } else if (credentialId) return tokenError("invalid_grant", "Unexpected managed binding.");
   const now = nowSeconds();
   const accessPayload: AccessTokenPayload = {
     typ: "access_token",
@@ -400,34 +414,42 @@ async function issueTokens(
     scope,
     sub: subject,
     ...(identityVersion ? { identityVersion } : {}),
+    ...(credentialId ? { credentialId } : {}),
     iat: now,
-    exp: now + ACCESS_TOKEN_TTL_SECONDS,
+    exp: Math.min(now + ACCESS_TOKEN_TTL_SECONDS, binding?.expiresAt ?? Infinity),
   };
   const refreshPayload: RefreshTokenPayload = {
     typ: "refresh_token",
+    ...(credentialId ? { jti: crypto.randomUUID() } : {}),
     aud: resource,
     scope,
     clientId,
     sub: subject,
     ...(identityVersion ? { identityVersion } : {}),
+    ...(credentialId ? { credentialId } : {}),
     clientMode,
     iat: now,
-    exp: now + REFRESH_TOKEN_TTL_SECONDS,
+    exp: Math.min(now + REFRESH_TOKEN_TTL_SECONDS, binding?.expiresAt ?? Infinity),
   };
   const [accessToken, refreshToken] = await Promise.all([
     signEnvelope("gypa", accessPayload),
     signEnvelope("gyprf", refreshPayload),
   ]);
+  if (binding) {
+    try { const final = await liveManaged(subject, credentialId, identityVersion, managed);
+      if (!final || final.expiresAt !== binding.expiresAt || (scopeIncludes(scope, OAUTH_WRITE_SCOPE) && !final.canWrite)) return tokenError("invalid_grant", "Managed identity changed during exchange.");
+    } catch { return tokenError("temporarily_unavailable", "Current managed identity is unavailable.", 503); }
+  }
   return noStoreJson({
     access_token: accessToken,
     token_type: "Bearer",
-    expires_in: ACCESS_TOKEN_TTL_SECONDS,
+    expires_in: accessPayload.exp - now,
     refresh_token: refreshToken,
     scope,
   });
 }
 
-async function handleAuthorizationCode(request: Request, form: FormData): Promise<Response> {
+async function handleAuthorizationCode(request: Request, form: FormData, managed?: ManagedOAuthRuntime): Promise<Response> {
   const code = String(form.get("code") ?? "");
   const credentials = tokenClientCredentials(request, form);
   const redirectUri = String(form.get("redirect_uri") ?? "");
@@ -466,15 +488,18 @@ async function handleAuthorizationCode(request: Request, form: FormData): Promis
     if (actualChallenge !== payload.codeChallenge) return tokenError("invalid_grant", "PKCE verification failed.");
   }
 
-  if (!currentIdentityVersion(payload.sub, payload.identityVersion)) return tokenError("invalid_grant", "Identity credential changed or was removed.");
+  if (payload.sub.startsWith("user:managed:")) {
+    try { if (!(await liveManaged(payload.sub, payload.credentialId, payload.identityVersion, managed))) return tokenError("invalid_grant", "Managed credential is unavailable."); }
+    catch { return tokenError("temporarily_unavailable", "Current managed identity is unavailable.", 503); }
+  } else if (payload.credentialId || !currentIdentityVersion(payload.sub, payload.identityVersion)) return tokenError("invalid_grant", "Identity credential changed or was removed.");
   if (!(await authorizationCodeReplayStore.consume(code, payload.exp))) {
     return tokenError("invalid_grant", "Authorization code has already been used.");
   }
 
-  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub, mode, payload.identityVersion);
+  return issueTokens(payload.resource, payload.scope, payload.clientId, payload.sub, mode, payload.identityVersion, payload.credentialId, managed);
 }
 
-async function handleRefreshToken(request: Request, form: FormData): Promise<Response> {
+async function handleRefreshToken(request: Request, form: FormData, managed?: ManagedOAuthRuntime): Promise<Response> {
   const refreshToken = String(form.get("refresh_token") ?? "");
   const credentials = tokenClientCredentials(request, form);
   const requestedResource = String(form.get("resource") ?? "");
@@ -501,8 +526,17 @@ async function handleRefreshToken(request: Request, form: FormData): Promise<Res
     return tokenError("invalid_client", "Public PKCE clients must not use a client secret.", 401);
   }
 
-  if (!currentIdentityVersion(payload.sub, payload.identityVersion)) return tokenError("invalid_grant", "Identity credential changed or was removed.");
-  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub, mode, payload.identityVersion);
+  if (payload.sub.startsWith("user:managed:")) {
+    try { if (!(await liveManaged(payload.sub, payload.credentialId, payload.identityVersion, managed))) return tokenError("invalid_grant", "Managed credential is unavailable."); }
+    catch { return tokenError("temporarily_unavailable", "Current managed identity is unavailable.", 503); }
+  } else if (payload.credentialId || !currentIdentityVersion(payload.sub, payload.identityVersion)) return tokenError("invalid_grant", "Identity credential changed or was removed.");
+  if (payload.credentialId && !(await authorizationCodeReplayStore.consume("managed-refresh:" + refreshToken, payload.exp))) return tokenError("invalid_grant", "Managed refresh token has already been used.");
+  return issueTokens(payload.aud, payload.scope, payload.clientId, payload.sub, mode, payload.identityVersion, payload.credentialId, managed);
+}
+
+async function liveManaged(subject: string, id: string | undefined, version: string | undefined, runtime?: ManagedOAuthRuntime) {
+  if (!managedOAuthEnabled(runtime) || !id || version) return null;
+  return validateManagedBinding(await runtime!.current(subject, id), subject, id);
 }
 
 function currentIdentityVersion(subject: string, version: string | undefined): boolean {
@@ -512,7 +546,7 @@ function currentIdentityVersion(subject: string, version: string | undefined): b
   catch { return false; }
 }
 
-export async function tokenOAuth(request: Request): Promise<Response> {
+export async function tokenOAuth(request: Request, managed?: ManagedOAuthRuntime): Promise<Response> {
   if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
   let form: FormData;
   try {
@@ -521,7 +555,7 @@ export async function tokenOAuth(request: Request): Promise<Response> {
     return tokenError("invalid_request", "Expected application/x-www-form-urlencoded body.");
   }
   const grantType = String(form.get("grant_type") ?? "");
-  if (grantType === "authorization_code") return handleAuthorizationCode(request, form);
-  if (grantType === "refresh_token") return handleRefreshToken(request, form);
+  if (grantType === "authorization_code") return handleAuthorizationCode(request, form, managed);
+  if (grantType === "refresh_token") return handleRefreshToken(request, form, managed);
   return tokenError("unsupported_grant_type", "Supported grants: authorization_code, refresh_token.");
 }

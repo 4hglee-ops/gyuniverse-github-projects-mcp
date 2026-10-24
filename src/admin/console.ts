@@ -11,6 +11,7 @@ const digest = (value: string) => createHash("sha256").update(value).digest("hex
 /** Server injection only. Client input never selects an actor, lease, epoch or policy. */
 export interface AdminDbConsoleBridge {
   assertEnabled(): void;
+  manage?(path: string, method: string, body: unknown, refresh: () => Promise<VerifiedOperator>, record: AdminSessionRecord, store: AdminSessionStore): Promise<unknown>;
   prepare(record: AdminSessionRecord, operator: VerifiedOperator): AdminSessionRecord;
   connect(record: AdminSessionRecord, store: AdminSessionStore): Promise<void>;
   assertCurrent(record: AdminSessionRecord, store: AdminSessionStore): Promise<void>;
@@ -111,6 +112,7 @@ export async function handleAdminRequest(request: Request, options: AdminConsole
     const operator = await refresh();
     if (path === "session") return json({ authenticated: true, csrf: csrf(token, key), expiresAt: record.expiresAt });
     if (managementRoute) {
+      if (options.dbBridge?.manage) return json(await options.dbBridge.manage(path, request.method, request.method === "POST" ? await input(request) : undefined, refresh, record, store));
       if (!options.management) throw new Error("ADMIN_MANAGEMENT_UNAVAILABLE: No verified management adapter is installed.");
       return json(await handleAdminManagement(path, request.method, request.method === "POST" ? await input(request) : undefined, refresh, options.management));
     }
