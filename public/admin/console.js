@@ -1,4 +1,4 @@
-// Synthetic management contract client. No browser credential persistence or automatic mutation retries.
+// Management contract client. No browser credential persistence or automatic mutation retries.
 export function createAdminConsole(fetcher = fetch, onChange = () => {}, uuid = () => crypto.randomUUID()) {
   const empty = () => ({ connected: false, busy: false, overview: null, oneTime: null, error: null, result: null, uncertain: false });
   let model = empty(), csrf = "", generation = 0, clearTimer, sessionTimer;
@@ -65,7 +65,7 @@ export function createAdminConsole(fetcher = fetch, onChange = () => {}, uuid = 
         const data = await request(path, { ...input, operationId });
         model.result = { operationId, state: data.replayed ? "already-applied" : "confirmed", target: data.target };
         await overview(request); model.uncertain = false;
-        if (data.secret && data.syntheticOnly === true && /^synthetic-only-[A-Za-z0-9-]{1,100}$/.test(data.secret)) {
+        if (data.secret && ((data.syntheticOnly === true && /^synthetic-only-[A-Za-z0-9-]{1,100}$/.test(data.secret)) || (path === "credentials" && data.operationId === operationId && data.syntheticOnly === false && data.candidateAccepted === true && data.replayed === false && /^gypk_[A-Za-z0-9_-]{43}$/.test(data.secret)))) {
           model.oneTime = data.secret; clearTimer = setTimeout(() => { clearSecret(); notify(); }, 30000);
         }
         return snapshot();
@@ -93,7 +93,7 @@ export function mountAdminConsole(document, clientFactory = createAdminConsole) 
       for (const role of ["viewer", "member", "admin"]) { const option = element("option", role); option.value = role; option.selected = role === user.role; roles.append(option); }
       const projects = field("전체 Project ID", user.projectIds.join(", "));
       const enabled = field("활성", "", "checkbox"); enabled.input.checked = user.enabled;
-      const approved = field("변경/발급 승인", "", "checkbox"); const save = element("button", "역할·범위 저장"), issue = element("button", "합성 키 발급"); issue.type = "button";
+      const approved = field("변경/발급 승인", "", "checkbox"); const save = element("button", "역할·범위 저장"), issue = element("button", state.overview.syntheticOnly ? "합성 키 발급" : "키 발급"); issue.type = "button";
       save.disabled = !user.canUpdate; issue.disabled = !user.canIssue;
       form.append(roles, projects.holder, enabled.holder, approved.holder, save, issue);
       form.addEventListener("submit", action(() => client.mutate("users/update", { subject: user.subject, expectedVersion: user.version, role: roles.value, projectIds: projects.input.value.split(",").map((s) => s.trim()).filter(Boolean), enabled: enabled.input.checked }, approved.input.checked)));

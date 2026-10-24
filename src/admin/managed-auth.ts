@@ -9,7 +9,7 @@ const subject = z.string().regex(/^user:managed:[0-9a-f-]{36}$/).refine((s) => z
 export const managedUserSchema = z.object({ subject, displayName: z.string().trim().min(1).max(100), githubLogin: z.string().max(100),
   role, projectIds: ids, enabled: z.boolean(), version: z.number().int().positive() }).strict();
 export const managedKeySchema = z.object({ id: z.uuid(), subject, role, projectIds: ids, revoked: z.boolean(), version: z.number().int().positive() }).strict();
-export const adminAuditSchema = z.object({ id: z.uuid(), actorId: z.string().min(1).max(256), operation: z.string().max(80),
+export const adminAuditSchema = z.object({ id: z.union([z.uuid(), z.string().regex(/^[1-9][0-9]{0,18}$/)]), actorId: z.string().min(1).max(256), operation: z.string().max(80),
   target: z.string().max(256), projectIds: ids, at: z.number().int().nonnegative() }).strict();
 export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type ManagedKey = z.infer<typeof managedKeySchema>;
@@ -51,14 +51,16 @@ export class MemoryAdminManagementStore implements AdminManagementStore {
     this.tail = pending.then(() => undefined, () => undefined); return pending;
   }
 }
-export interface ManagementRuntime { store: AdminManagementStore; policy: (operator: VerifiedOperator) => Promise<AdminPolicy> | AdminPolicy }
+export interface SyntheticManagementRuntime { store: AdminManagementStore; policy: (operator: VerifiedOperator) => Promise<AdminPolicy> | AdminPolicy }
+export interface ScopedManagementRuntime { persistence: "scoped-db"; handle(path: string, method: string, body: unknown, refresh: () => Promise<VerifiedOperator>): Promise<unknown> }
+export type ManagementRuntime = SyntheticManagementRuntime | ScopedManagementRuntime;
 const reference = z.object({ operationId: z.uuid() });
 const create = reference.extend({ displayName: managedUserSchema.shape.displayName, githubLogin: managedUserSchema.shape.githubLogin,
   role, projectIds: ids }).strict();
 const update = reference.extend({ subject, role, projectIds: ids, enabled: z.boolean(), expectedVersion: z.number().int().positive() }).strict();
 const issue = reference.extend({ subject, expectedVersion: z.number().int().positive() }).strict();
 const revoke = reference.extend({ id: z.uuid(), expectedVersion: z.number().int().positive() }).strict();
-const schemas = { users: create, "users/update": update, credentials: issue, "credentials/revoke": revoke };
+export const managementInputSchemas = { users: create, "users/update": update, credentials: issue, "credentials/revoke": revoke };
 function invalid(message = "Management input is invalid."): never { throw new Error("ADMIN_INPUT_INVALID: " + message); }
 function denied(): never { throw new Error("ADMIN_PERMISSION_DENIED: Management scope is unavailable."); }
 function authorize(policy: AdminPolicy, operator: VerifiedOperator, operation: AdminOperation, target: { projectIds: string[]; role?: ManagedUser["role"] }) {
@@ -68,6 +70,7 @@ function allows(policy: AdminPolicy, operator: VerifiedOperator, operation: Admi
   try { authorize(policy, operator, operation, target); return true; } catch { return false; }
 }
 export async function handleAdminManagement(path: string, method: string, body: unknown, refresh: () => Promise<VerifiedOperator>, runtime: ManagementRuntime): Promise<unknown> {
+  if ("handle" in runtime) return runtime.handle(path, method, body, refresh);
   if (method === "GET" && path === "overview") {
     const snapshot = state(await runtime.store.read()), policy = await runtime.policy(await refresh()), operator = await refresh();
     const projects = operator.principal.projectIds.filter((id) => allows(policy, operator, "admin.users.read", { projectIds: [id] }));
@@ -84,8 +87,8 @@ export async function handleAdminManagement(path: string, method: string, body: 
       users: users.map((u) => ({ ...u, canUpdate: allows(policy, operator, "admin.users.write", u), canIssue: u.enabled && allows(policy, operator, "admin.credentials.issue", u) })),
       credentials: credentials.map((key) => ({ ...key, canRevoke: allows(policy, operator, "admin.credentials.revoke", key) })), audit };
   }
-  if (method !== "POST" || !Object.hasOwn(schemas, path)) throw new Error("ADMIN_ROUTE_NOT_FOUND: Unsupported management route.");
-  const parsed = schemas[path as keyof typeof schemas].safeParse(body); if (!parsed.success) return invalid();
+  if (method !== "POST" || !Object.hasOwn(managementInputSchemas, path)) throw new Error("ADMIN_ROUTE_NOT_FOUND: Unsupported management route.");
+  const parsed = managementInputSchemas[path as keyof typeof managementInputSchemas].safeParse(body); if (!parsed.success) return invalid();
   const input = parsed.data;
   const digest = createHash("sha256").update(JSON.stringify([path, input])).digest("hex");
   // The callback is the transaction boundary. Refresh and policy checks belong inside it, after waiting for the lock.

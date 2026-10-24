@@ -5,7 +5,7 @@ import { PROJECT_PERMISSIONS, permissionsForRole, type AuthenticatedPrincipal } 
 import type { AdminSessionRecord } from "./session-store.js";
 import { operatorPolicyDigest, scopedActorContext, type ScopedIssueTransport } from "./scoped-credential-rpc.js";
 
-const rpcNames = ["mcp_admin_issue_credential_scoped_v1", "mcp_admin_lease_v1", "mcp_admin_managed_principal_v1"] as const;
+const rpcNames = ["mcp_admin_issue_credential_scoped_v1", "mcp_admin_lease_v1", "mcp_admin_managed_principal_v1", "mcp_admin_overview_v1", "mcp_admin_management_v1", "mcp_admin_oauth_binding_v1"] as const;
 type RpcName = typeof rpcNames[number];
 export interface ScopedDbTransport { rpc(name: RpcName, args: Record<string, unknown>): Promise<unknown> }
 function enabled(value?: boolean): void {

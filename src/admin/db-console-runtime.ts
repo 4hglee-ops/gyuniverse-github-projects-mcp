@@ -1,3 +1,4 @@
+import { createDbManagementRuntime } from "./db-management.js";
 import { z } from "zod";
 import type { AppConfig } from "../config.js";
 import { resolveSessionOperator, type VerifiedOperator } from "../http/operator-auth.js";
@@ -8,6 +9,7 @@ import { operatorPolicyDigest } from "./scoped-credential-rpc.js";
 
 interface Options {
   enabled?: boolean;
+  managementEnabled?: boolean;
   runtime: AdminConsoleRuntime & { config: AppConfig; sessionStore: AdminSessionStore };
   transport: ScopedDbTransport;
   expectedEpoch: (operator: VerifiedOperator) => number;
@@ -50,5 +52,7 @@ export function createAdminDbConsoleRuntime(options: Options): AdminConsoleRunti
       await coordinator(record, store).revoke(record, record.dbLease.authEpoch, record.dbLease.policyDigest);
     },
   };
+  if (options.managementEnabled === true) dbBridge.manage = (path, method, body, refresh, record, store) =>
+    createDbManagementRuntime({ enabled: true, transport: options.transport, leaseFor: (operator) => coordinator(record, store).leaseFor(operator) }).handle(path, method, body, refresh);
   return { ...options.runtime, auth, dbBridge };
 }
