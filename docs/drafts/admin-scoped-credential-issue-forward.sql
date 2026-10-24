@@ -19,7 +19,7 @@ GRANT USAGE ON SCHEMA mcp_admin_private TO service_role;
 CREATE TABLE mcp_admin_private.authorities(
  subject text PRIMARY KEY REFERENCES public.team_principals(id),active boolean NOT NULL DEFAULT false,
  source text NOT NULL CHECK(source IN ('env','managed')),identity_version text,credential_id uuid REFERENCES public.mcp_admin_credentials(id),
- auth_epoch bigint NOT NULL DEFAULT 1 CHECK(auth_epoch>0),project_ids text[] NOT NULL,
+ auth_epoch bigint NOT NULL DEFAULT 1 CHECK(auth_epoch>0),policy_digest text NOT NULL CHECK(policy_digest ~ '^[0-9a-f]{64}$'),project_ids text[] NOT NULL,
  max_grant_role text NOT NULL CHECK(max_grant_role IN ('viewer','member','admin')),
  operations text[] NOT NULL DEFAULT '{}',
  CHECK(operations <@ ARRAY['admin.credentials.issue']::text[]),
@@ -29,7 +29,7 @@ CREATE TABLE mcp_admin_private.authorities(
 );
 CREATE TABLE mcp_admin_private.leases(
  id_hash text PRIMARY KEY CHECK(id_hash ~ '^[0-9a-f]{64}$'),subject text NOT NULL REFERENCES mcp_admin_private.authorities(subject),
- auth_epoch bigint NOT NULL,source_reference text NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ auth_epoch bigint NOT NULL,source_reference text NOT NULL,policy_digest text NOT NULL CHECK(policy_digest ~ '^[0-9a-f]{64}$'),created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  proof_expires_at timestamptz NOT NULL,expires_at timestamptz NOT NULL,revoked_at timestamptz,
  CHECK(expires_at>created_at AND expires_at<=proof_expires_at AND expires_at<=created_at+interval '15 minutes')
 );
@@ -122,29 +122,25 @@ BEGIN
   IF n<>1 THEN RAISE EXCEPTION 'ADMIN_SCOPE_DENIED';END IF;
  END LOOP;
 END $$;
-CREATE FUNCTION public.mcp_admin_issue_credential_scoped_v1(p_actor jsonb,p_request jsonb,p_candidate_hash text) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path='' AS $$
-DECLARE a mcp_admin_private.authorities;l mcp_admin_private.leases;u public.mcp_admin_users;actor_user public.mcp_admin_users;k public.mcp_admin_credentials;
- receipt mcp_admin_private.issue_receipts;op uuid;expected bigint;target text;digest text;is_replay boolean:=false;source_ref text;source_exp timestamptz;actor_credential_expires timestamptz;
+-- Shared validation runs under the same transaction gate as final writes.
+CREATE FUNCTION mcp_admin_private.verified_authority(p_actor jsonb,p_require_lease boolean)
+RETURNS mcp_admin_private.authorities LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path='' AS $$
+DECLARE a mcp_admin_private.authorities;l mcp_admin_private.leases;k public.mcp_admin_credentials;actor_user public.mcp_admin_users;
+ source_ref text;source_exp timestamptz;actor_credential_expires timestamptz;
 BEGIN
- IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'ADMIN_RPC_ISOLATION_UNSUPPORTED';END IF;
- IF jsonb_typeof(p_actor) IS DISTINCT FROM 'object' OR jsonb_typeof(p_request) IS DISTINCT FROM 'object'
- OR EXISTS(SELECT FROM jsonb_object_keys(p_request)x WHERE x NOT IN ('operationId','subject','expectedVersion'))
- OR EXISTS(SELECT FROM jsonb_object_keys(p_actor)x WHERE x NOT IN ('subject','source','sourceReference','proofExpiresAt','scope','leaseIdHash','authEpoch','allowedOwners','projectIds','projectPermissions'))
- OR (p_request->>'expectedVersion') IS NULL OR (p_request->>'subject') IS NULL OR (p_request->>'operationId') IS NULL
- OR (p_actor->>'subject') IS NULL OR (p_actor->>'source') IS NULL OR (p_actor->>'sourceReference') IS NULL
- OR (p_actor->>'proofExpiresAt') IS NULL OR (p_actor->>'leaseIdHash') IS NULL OR (p_actor->>'authEpoch') IS NULL
+ IF current_setting('transaction_isolation')<>'read committed' OR jsonb_typeof(p_actor) IS DISTINCT FROM 'object'
+ OR NOT(p_actor ?& ARRAY['subject','source','sourceReference','proofExpiresAt','leaseIdHash','authEpoch','policyDigest'])
+ OR EXISTS(SELECT FROM jsonb_object_keys(p_actor)x WHERE x NOT IN ('subject','source','sourceReference','proofExpiresAt','scope','leaseIdHash','authEpoch','policyDigest','allowedOwners','projectIds','projectPermissions'))
+ OR jsonb_typeof(p_actor->'authEpoch') IS DISTINCT FROM 'number' OR jsonb_typeof(p_actor->'proofExpiresAt') IS DISTINCT FROM 'number'
+ OR coalesce(p_actor->>'leaseIdHash','') !~ '^[0-9a-f]{64}$' OR coalesce(p_actor->>'policyDigest','') !~ '^[0-9a-f]{64}$'
  OR jsonb_typeof(p_actor->'scope') IS DISTINCT FROM 'array' OR NOT(p_actor->'scope' ? 'projects:read' AND p_actor->'scope' ? 'projects:write')
  OR jsonb_typeof(p_actor->'allowedOwners') IS DISTINCT FROM 'array' OR jsonb_typeof(p_actor->'projectIds') IS DISTINCT FROM 'array'
- OR jsonb_typeof(p_actor->'projectPermissions') IS DISTINCT FROM 'object'
- OR coalesce(p_candidate_hash,'') !~ '^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END IF;
- BEGIN op:=(p_request->>'operationId')::uuid;expected:=(p_request->>'expectedVersion')::bigint;source_exp:=to_timestamp((p_actor->>'proofExpiresAt')::bigint);
- EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END;
- target:=p_request->>'subject';
- IF expected<1 OR target !~ '^user:managed:[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END IF;
- BEGIN PERFORM substring(target FROM 14)::uuid;EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END;
+ OR jsonb_typeof(p_actor->'projectPermissions') IS DISTINCT FROM 'object' THEN RAISE EXCEPTION 'ADMIN_ACTOR_DENIED';END IF;
+ source_exp:=to_timestamp((p_actor->>'proofExpiresAt')::bigint);
  PERFORM mcp_admin_private.gate();
  SELECT * INTO a FROM mcp_admin_private.authorities WHERE subject=p_actor->>'subject';
- IF NOT FOUND OR NOT a.active OR a.auth_epoch::text<>p_actor->>'authEpoch' OR a.source<>p_actor->>'source'
+ IF NOT FOUND OR NOT a.active OR a.auth_epoch::text IS DISTINCT FROM p_actor->>'authEpoch' OR a.source IS DISTINCT FROM p_actor->>'source'
+ OR a.policy_digest IS DISTINCT FROM p_actor->>'policyDigest'
  OR NOT 'admin.credentials.issue'=ANY(a.operations) OR source_exp<=clock_timestamp() THEN RAISE EXCEPTION 'ADMIN_ACTOR_DENIED';END IF;
  source_ref:=coalesce(a.identity_version,a.credential_id::text);
  IF source_ref IS DISTINCT FROM p_actor->>'sourceReference' THEN RAISE EXCEPTION 'ADMIN_ACTOR_DENIED';END IF;
@@ -159,9 +155,34 @@ BEGIN
   a.project_ids:=ARRAY(SELECT id FROM unnest(a.project_ids) AS ids(id)
    WHERE id=ANY(actor_user.project_ids) AND id=ANY(k.issued_project_ids));
  END IF;
+ IF p_require_lease THEN
  SELECT * INTO l FROM mcp_admin_private.leases WHERE id_hash=p_actor->>'leaseIdHash';
  IF NOT FOUND OR l.subject<>a.subject OR l.auth_epoch<>a.auth_epoch OR l.source_reference<>source_ref OR l.revoked_at IS NOT NULL
- OR l.created_at>clock_timestamp() OR l.expires_at<=clock_timestamp() OR l.proof_expires_at<>source_exp THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+ OR l.policy_digest<>a.policy_digest OR l.created_at>clock_timestamp() OR l.expires_at<=clock_timestamp() OR l.proof_expires_at<>source_exp THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+ END IF;
+ RETURN a;
+END $$;
+CREATE FUNCTION public.mcp_admin_issue_credential_scoped_v1(p_actor jsonb,p_request jsonb,p_candidate_hash text) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path='' AS $$
+DECLARE a mcp_admin_private.authorities;u public.mcp_admin_users;k public.mcp_admin_credentials;
+ receipt mcp_admin_private.issue_receipts;op uuid;expected bigint;target text;digest text;is_replay boolean:=false;source_ref text;source_exp timestamptz;actor_credential_expires timestamptz;
+BEGIN
+ IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'ADMIN_RPC_ISOLATION_UNSUPPORTED';END IF;
+ IF jsonb_typeof(p_actor) IS DISTINCT FROM 'object' OR jsonb_typeof(p_request) IS DISTINCT FROM 'object'
+ OR EXISTS(SELECT FROM jsonb_object_keys(p_request)x WHERE x NOT IN ('operationId','subject','expectedVersion'))
+ OR EXISTS(SELECT FROM jsonb_object_keys(p_actor)x WHERE x NOT IN ('subject','source','sourceReference','proofExpiresAt','scope','leaseIdHash','authEpoch','policyDigest','allowedOwners','projectIds','projectPermissions'))
+ OR (p_request->>'expectedVersion') IS NULL OR (p_request->>'subject') IS NULL OR (p_request->>'operationId') IS NULL
+ OR (p_actor->>'subject') IS NULL OR (p_actor->>'source') IS NULL OR (p_actor->>'sourceReference') IS NULL
+ OR (p_actor->>'proofExpiresAt') IS NULL OR (p_actor->>'leaseIdHash') IS NULL OR (p_actor->>'authEpoch') IS NULL
+ OR jsonb_typeof(p_actor->'scope') IS DISTINCT FROM 'array' OR NOT(p_actor->'scope' ? 'projects:read' AND p_actor->'scope' ? 'projects:write')
+ OR jsonb_typeof(p_actor->'allowedOwners') IS DISTINCT FROM 'array' OR jsonb_typeof(p_actor->'projectIds') IS DISTINCT FROM 'array'
+ OR jsonb_typeof(p_actor->'projectPermissions') IS DISTINCT FROM 'object'
+ OR coalesce(p_candidate_hash,'') !~ '^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END IF;
+ BEGIN op:=(p_request->>'operationId')::uuid;expected:=(p_request->>'expectedVersion')::bigint;source_exp:=to_timestamp((p_actor->>'proofExpiresAt')::bigint);
+ EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END;
+ target:=p_request->>'subject';
+ IF expected<1 OR target !~ '^user:managed:[0-9a-f-]{36}$' THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END IF;
+ BEGIN PERFORM substring(target FROM 14)::uuid;EXCEPTION WHEN invalid_text_representation THEN RAISE EXCEPTION 'ADMIN_RPC_INPUT_INVALID';END;
+ a:=mcp_admin_private.verified_authority(p_actor,true);
  SELECT * INTO u FROM public.mcp_admin_users WHERE subject=target FOR UPDATE;
  IF NOT FOUND OR NOT u.enabled THEN RAISE EXCEPTION 'ADMIN_TARGET_DENIED';END IF;
  PERFORM mcp_admin_private.check_issue_scope(a,p_actor,u.project_ids,u.role);
@@ -180,12 +201,111 @@ BEGIN
    VALUES(a.subject,'issue_credential_scoped_v1',target,k.id,op,u.project_ids);
   INSERT INTO mcp_admin_private.issue_receipts VALUES(op,a.subject,digest,target,expected,k.id,u.role,u.project_ids,clock_timestamp());
  END IF;
- IF source_exp<=clock_timestamp() OR l.expires_at<=clock_timestamp() OR (actor_credential_expires IS NOT NULL AND actor_credential_expires<=clock_timestamp()) THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+ -- Recheck proof/managed key/DB lease immediately before returning from this write transaction.
+ PERFORM mcp_admin_private.verified_authority(p_actor,true);
  RETURN jsonb_build_object('operationId',op,'credentialId',k.id,'subject',target,'userVersion',expected,'keyVersion',k.version,
  'expiresAt',floor(extract(epoch FROM k.expires_at))::bigint,'replayed',is_replay,'candidateAccepted',NOT is_replay,'secretUnavailable',is_replay);
 END $$;
+-- Explicit lifecycle, no renewal, no authority enrollment or epoch auto-repair.
+-- Trusted backend may write lease rows, never authority configuration. Private tables are not Data API exposed.
+GRANT INSERT ON mcp_admin_private.leases TO service_role;
+GRANT UPDATE(revoked_at) ON mcp_admin_private.leases TO service_role;
+CREATE FUNCTION public.mcp_admin_lease_v1(p_actor jsonb,p_request jsonb) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path='' AS $$
+DECLARE a mcp_admin_private.authorities;l mcp_admin_private.leases;action text;expiry timestamptz;proof_exp timestamptz;
+BEGIN
+ IF jsonb_typeof(p_request) IS DISTINCT FROM 'object'
+ OR EXISTS(SELECT FROM jsonb_object_keys(p_request)x WHERE x NOT IN ('action','expiresAt'))
+ OR coalesce(p_actor->>'leaseIdHash','') !~ '^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+ action:=p_request->>'action';
+ IF action IS NULL OR action NOT IN ('register','get','revoke') THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+ PERFORM mcp_admin_private.gate();
+ IF action='revoke' THEN
+  -- Revocation is allowed after role/epoch/proof expiry. It can only close this exact server session binding.
+  IF NOT(p_actor ?& ARRAY['subject','sourceReference','proofExpiresAt','authEpoch','policyDigest']) THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+  SELECT * INTO l FROM mcp_admin_private.leases WHERE id_hash=p_actor->>'leaseIdHash';
+  IF FOUND THEN
+   IF l.subject IS DISTINCT FROM p_actor->>'subject' OR l.source_reference IS DISTINCT FROM p_actor->>'sourceReference'
+    OR l.proof_expires_at IS DISTINCT FROM to_timestamp((p_actor->>'proofExpiresAt')::bigint) THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+   UPDATE mcp_admin_private.leases SET revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE id_hash=l.id_hash;
+  ELSE
+   -- A tombstone prevents a delayed registration from resurrecting a session after logout.
+   proof_exp:=to_timestamp((p_actor->>'proofExpiresAt')::bigint);
+   expiry:=least(to_timestamp((p_request->>'expiresAt')::bigint),proof_exp,clock_timestamp()+interval '15 minutes');
+   IF expiry>clock_timestamp() THEN
+    INSERT INTO mcp_admin_private.leases(id_hash,subject,auth_epoch,source_reference,policy_digest,proof_expires_at,expires_at,revoked_at)
+    VALUES(p_actor->>'leaseIdHash',p_actor->>'subject',(p_actor->>'authEpoch')::bigint,p_actor->>'sourceReference',p_actor->>'policyDigest',proof_exp,expiry,clock_timestamp());
+   END IF;
+  END IF;
+  RETURN jsonb_build_object('idHash',p_actor->>'leaseIdHash','revoked',true);
+ END IF;
+ a:=mcp_admin_private.verified_authority(p_actor,action='get');
+ IF action='register' THEN
+  PERFORM mcp_admin_private.check_issue_scope(a,p_actor,ARRAY(SELECT jsonb_array_elements_text(p_actor->'projectIds')),'viewer');
+  proof_exp:=to_timestamp((p_actor->>'proofExpiresAt')::bigint);expiry:=to_timestamp((p_request->>'expiresAt')::bigint);
+  IF expiry IS NULL OR expiry<=clock_timestamp() OR expiry>proof_exp OR expiry>clock_timestamp()+interval '15 minutes' THEN RAISE EXCEPTION 'ADMIN_LEASE_DENIED';END IF;
+  INSERT INTO mcp_admin_private.leases(id_hash,subject,auth_epoch,source_reference,policy_digest,proof_expires_at,expires_at)
+  VALUES(p_actor->>'leaseIdHash',a.subject,a.auth_epoch,p_actor->>'sourceReference',a.policy_digest,proof_exp,expiry) ON CONFLICT DO NOTHING;
+  SELECT * INTO l FROM mcp_admin_private.leases WHERE id_hash=p_actor->>'leaseIdHash';
+  IF l.expires_at IS DISTINCT FROM expiry THEN RAISE EXCEPTION 'ADMIN_LEASE_CONFLICT';END IF;
+  a:=mcp_admin_private.verified_authority(p_actor,true);
+ ELSE
+  SELECT * INTO l FROM mcp_admin_private.leases WHERE id_hash=p_actor->>'leaseIdHash';
+ END IF;
+ RETURN jsonb_build_object('idHash',l.id_hash,'authEpoch',l.auth_epoch,'expiresAt',floor(extract(epoch FROM l.expires_at))::bigint,'policyDigest',l.policy_digest);
+END $$;
+REVOKE ALL ON FUNCTION public.mcp_admin_lease_v1(jsonb,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.mcp_admin_lease_v1(jsonb,jsonb) TO service_role;
+
+-- Control-plane stage only. Owner-only; never exposed to the runtime backend.
+-- Atomic DB close + monotonic epoch + manifest binding + revocation. Activation requires a separately reviewed owner action.
+CREATE FUNCTION mcp_admin_private.stage_authority(p_subject text,p_expected_epoch bigint,p_source_reference text,p_policy_digest text) RETURNS bigint
+LANGUAGE plpgsql SECURITY INVOKER SET search_path='' AS $$
+DECLARE a mcp_admin_private.authorities;next_identity text;next_credential uuid;
+BEGIN
+ PERFORM mcp_admin_private.gate();SELECT * INTO a FROM mcp_admin_private.authorities WHERE subject=p_subject FOR UPDATE;
+ IF NOT FOUND OR p_expected_epoch IS NULL OR a.auth_epoch<>p_expected_epoch OR coalesce(p_policy_digest,'') !~ '^[0-9a-f]{64}$'
+ OR p_source_reference IS NULL THEN RAISE EXCEPTION 'ADMIN_EPOCH_CONFLICT';END IF;
+ -- Separate typed assignment avoids planner folding an ENV binding into a UUID cast in a dead CASE arm.
+ IF a.source='env' THEN next_identity:=p_source_reference;ELSE next_credential:=p_source_reference::uuid;END IF;
+ UPDATE mcp_admin_private.authorities SET active=false,auth_epoch=auth_epoch+1,policy_digest=p_policy_digest,
+  identity_version=next_identity,credential_id=next_credential WHERE subject=p_subject RETURNING auth_epoch INTO p_expected_epoch;
+ UPDATE mcp_admin_private.leases SET revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE subject=p_subject;
+ RETURN p_expected_epoch;
+END $$;
+
+-- Current managed identity metadata only. No secret hashes, keys, enrollment or fallback to role-only authority.
+CREATE FUNCTION public.mcp_admin_managed_principal_v1(p_subject text,p_credential_id uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path='' AS $$
+DECLARE u public.mcp_admin_users;k public.mcp_admin_credentials;r record;p text;role_name text;per_project jsonb:='{}';projects text[]:='{}';effective text[];n int;
+BEGIN
+ SELECT * INTO u FROM public.mcp_admin_users WHERE subject=p_subject;
+ IF NOT FOUND OR NOT u.enabled THEN RETURN NULL;END IF;
+ SELECT * INTO k FROM public.mcp_admin_credentials WHERE id=p_credential_id AND subject=p_subject;
+ IF NOT FOUND OR k.revoked_at IS NOT NULL OR k.expires_at<=clock_timestamp() OR k.issued_role IS NULL OR k.issued_project_ids IS NULL THEN RETURN NULL;END IF;
+ role_name:=CASE WHEN mcp_admin_private.role_rank(u.role)<=mcp_admin_private.role_rank(k.issued_role) THEN u.role ELSE k.issued_role END;
+ FOREACH p IN ARRAY u.project_ids LOOP
+  IF NOT p=ANY(k.issued_project_ids) THEN CONTINUE;END IF;n:=0;effective:='{}';
+  FOR r IN SELECT g.*,tr.write_enabled AS allow_write FROM public.get_team_access_snapshot(p_subject) g
+   JOIN public.team_resources tr ON tr.id::text=g."resourceId" AND tr.team_id::text=g."teamId"
+   WHERE g."provider"='github_projects' AND g."externalResourceId"=p AND tr.kind='github_project_v2' LOOP
+   n:=n+1;IF n>1 THEN RAISE EXCEPTION 'ADMIN_ACL_AMBIGUOUS';END IF;
+   IF NOT coalesce(r."permissions",mcp_admin_private.role_permissions(r."grantRole"))<@mcp_admin_private.role_permissions(r."grantRole") THEN RAISE EXCEPTION 'ADMIN_SCOPE_DENIED';END IF;
+   SELECT array_agg(x) INTO effective FROM unnest(mcp_admin_private.role_permissions(role_name)) x
+    WHERE x=ANY(mcp_admin_private.role_permissions(r."teamRole")) AND x=ANY(coalesce(r."permissions",mcp_admin_private.role_permissions(r."grantRole")))
+    AND (r.allow_write OR x='project.read');
+  END LOOP;
+  IF 'project.read'=ANY(effective) THEN projects:=array_append(projects,p);per_project:=per_project||jsonb_build_object(p,effective);END IF;
+ END LOOP;
+ IF k.expires_at<=clock_timestamp() THEN RETURN NULL;END IF;
+ RETURN jsonb_build_object('id',p_subject,'role',role_name,'permissions',mcp_admin_private.role_permissions(role_name),'projectIds',projects,'resourcePermissions',per_project,'source','oauth');
+END $$;
+REVOKE ALL ON FUNCTION public.mcp_admin_managed_principal_v1(text,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.mcp_admin_managed_principal_v1(text,uuid) TO service_role;
+
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA mcp_admin_private FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA mcp_admin_private TO service_role;
+REVOKE EXECUTE ON FUNCTION mcp_admin_private.stage_authority(text,bigint,text,text) FROM service_role;
 REVOKE ALL ON FUNCTION public.mcp_admin_issue_credential_scoped_v1(jsonb,jsonb,text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.mcp_admin_issue_credential_scoped_v1(jsonb,jsonb,text) TO service_role;
 -- Remove the obsolete backend entrypoint; the insert trigger also bounds direct/owner insert races.

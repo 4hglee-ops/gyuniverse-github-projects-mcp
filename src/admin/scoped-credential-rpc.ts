@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { assertSessionBoundOperator, operatorConfig, type VerifiedOperator } from "../http/operator-auth.js";
 import { OAUTH_WRITE_SCOPE, scopeIncludes } from "../oauth/stateless.js";
 import { principalHasProjectPermission } from "../core/identity/principal.js";
@@ -10,6 +11,30 @@ const responseSchema = z.object({ operationId: z.uuid(), credentialId: z.uuid(),
   userVersion: z.number().int().positive().safe(), keyVersion: z.number().int().positive().safe(), expiresAt: z.number().int().positive().safe(),
   replayed: z.boolean(), candidateAccepted: z.boolean(), secretUnavailable: z.boolean() }).strict()
   .refine((r) => r.candidateAccepted === !r.replayed && r.secretUnavailable === r.replayed);
+/** Server policy manifest, not an OAuth credential. Sort every set so DB/worker comparisons are stable. */
+export function operatorPolicyDigest(operator: VerifiedOperator): string {
+  assertSessionBoundOperator(operator);
+  const config = operatorConfig(operator), p = operator.principal;
+  return createHash("sha256").update(JSON.stringify({ subject: operator.proof.subject, source: operator.proof.source,
+    sourceReference: operator.proof.identityVersion ?? operator.proof.credentialId, role: p.role,
+    owners: [...new Set(config.allowedOwners.map((v) => v.toLowerCase()))].sort(),
+    allowedProjects: [...new Set(config.allowedProjectIds)].sort(), projects: [...p.projectIds].sort(), permissions: [...p.permissions].sort(),
+    perProject: [...p.projectIds].sort().map((id) => [id, p.permissions.filter((permission) => principalHasProjectPermission(p, id, permission)).sort()]),
+  })).digest("hex");
+}
+/** Only accepts branded current operators; shared by issuance and server session lease lifecycle. */
+export function scopedActorContext(operator: VerifiedOperator, lease: z.infer<typeof leaseSchema>): Record<string, unknown> {
+  assertSessionBoundOperator(operator); leaseSchema.parse(lease);
+  if (operator.principal.role !== "admin" || !scopeIncludes(operator.proof.scope, OAUTH_WRITE_SCOPE)) throw new Error("ADMIN_ACTOR_DENIED");
+  const config = operatorConfig(operator), projectIds = operator.principal.projectIds.filter((id) =>
+    config.allowedProjectIds.includes(id) && principalHasProjectPermission(operator.principal, id, "project.write"));
+  if (!config.allowedOwners.length || !projectIds.length) throw new Error("ADMIN_ACTOR_DENIED");
+  return { subject: operator.proof.subject, source: operator.proof.source, sourceReference: operator.proof.identityVersion ?? operator.proof.credentialId,
+    proofExpiresAt: operator.proof.expiresAt, scope: operator.proof.scope.split(/\s+/).filter(Boolean),
+    leaseIdHash: lease.idHash, authEpoch: lease.authEpoch, policyDigest: operatorPolicyDigest(operator),
+    allowedOwners: config.allowedOwners.map((id) => id.toLowerCase()), projectIds,
+    projectPermissions: Object.fromEntries(projectIds.map((id) => [id, operator.principal.permissions.filter((p) => principalHasProjectPermission(operator.principal, id, p))])) };
+}
 export interface ScopedIssueTransport {
   /** Trusted server adapter only. Never expose service credentials or raw RPC payloads to a client. */
   rpc(name: "mcp_admin_issue_credential_scoped_v1", args: { p_actor: Record<string, unknown>; p_request: z.infer<typeof scopedIssueInput>; p_candidate_hash: string }): Promise<unknown>;
@@ -48,10 +73,7 @@ export class ScopedCredentialRpc {
       if (!allowedOwners.length || !projectIds.length) throw new Error("denied");
       const projectPermissions = Object.fromEntries(projectIds.map((id) => [id, current.principal.permissions.filter((p) =>
         principalHasProjectPermission(current.principal, id, p) && principalHasProjectPermission(first.principal, id, p))]));
-      const p_actor = { subject: current.proof.subject, source: current.proof.source,
-        sourceReference: current.proof.identityVersion ?? current.proof.credentialId, proofExpiresAt: current.proof.expiresAt,
-        scope: current.proof.scope.split(/\s+/).filter(Boolean), leaseIdHash: lease.idHash, authEpoch: lease.authEpoch,
-        allowedOwners, projectIds, projectPermissions };
+      const p_actor = { ...scopedActorContext(current, lease), allowedOwners, projectIds, projectPermissions };
       const raw = await this.options.transport.rpc("mcp_admin_issue_credential_scoped_v1", { p_actor, p_request: input, p_candidate_hash: candidateHash });
       const result = responseSchema.parse(raw);
       if (result.operationId !== input.operationId || result.subject !== input.subject || result.userVersion !== input.expectedVersion

@@ -9,7 +9,8 @@ const proofSchema = z.object({ subject: z.string().min(1).max(256), scope: z.str
   .refine((p) => scopeIncludes(p.scope, OAUTH_READ_SCOPE) && (p.source === "env"
     ? !!p.identityVersion && !p.credentialId && p.subject !== "gyuniverse-projects-team" && !p.subject.startsWith("user:managed:")
     : !!p.credentialId && !p.identityVersion && p.subject.startsWith("user:managed:") && z.uuid().safeParse(p.subject.slice("user:managed:".length)).success));
-const sessionSchema = z.object({ version: z.literal(1), idHash: hash, csrfHash: hash, proof: proofSchema,
+const dbLeaseSchema = z.object({ authEpoch: z.number().int().positive().safe(), policyDigest: hash }).strict();
+const sessionSchema = z.object({ dbLease: dbLeaseSchema.optional(), version: z.literal(1), idHash: hash, csrfHash: hash, proof: proofSchema,
   createdAt: z.number().int().nonnegative(), expiresAt: z.number().int().positive(), revokedAt: z.number().int().nonnegative().nullable() }).strict()
   .refine((s) => s.expiresAt > s.createdAt && s.expiresAt <= Math.min(s.proof.expiresAt, s.createdAt + 900));
 export type AdminSessionRecord = z.infer<typeof sessionSchema>;

@@ -1,14 +1,22 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { loadConfig } from "../config.js";
 import { bearerToken, publicBaseUrl } from "../oauth/stateless.js";
-import { resolveVerifiedOperator, resolveSessionOperator, assertSessionBoundOperator, type OperatorAuthOptions } from "../http/operator-auth.js";
-import { boundSessionRecord, createAdminSessionStore, requireSharedAdminSessions, type AdminSessionStore } from "./session-store.js";
+import { resolveVerifiedOperator, resolveSessionOperator, assertSessionBoundOperator, type OperatorAuthOptions, type VerifiedOperator } from "../http/operator-auth.js";
+import { boundSessionRecord, createAdminSessionStore, requireSharedAdminSessions, type AdminSessionStore, type AdminSessionRecord } from "./session-store.js";
 import { handleAdminView, type AdminViewRuntime } from "./view-adapter.js";
 import { handleAdminManagement, type ManagementRuntime } from "./managed-auth.js";
 
 const cookieName = "__Host-gyp_admin_session", prefix = "/api/admin/v1/";
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
-export interface AdminConsoleRuntime extends AdminViewRuntime { sessionStore?: AdminSessionStore; auth?: OperatorAuthOptions; management?: ManagementRuntime }
+/** Server injection only. Client input never selects an actor, lease, epoch or policy. */
+export interface AdminDbConsoleBridge {
+  assertEnabled(): void;
+  prepare(record: AdminSessionRecord, operator: VerifiedOperator): AdminSessionRecord;
+  connect(record: AdminSessionRecord, store: AdminSessionStore): Promise<void>;
+  assertCurrent(record: AdminSessionRecord, store: AdminSessionStore): Promise<void>;
+  close(record: AdminSessionRecord, store: AdminSessionStore): Promise<void>;
+}
+export interface AdminConsoleRuntime extends AdminViewRuntime { sessionStore?: AdminSessionStore; auth?: OperatorAuthOptions; management?: ManagementRuntime; dbBridge?: AdminDbConsoleBridge }
 export function adminConsoleEnabled(): boolean {
   return process.env.GYP_ADMIN_CONSOLE_ENABLED === "true" && process.env.GYP_ADMIN_SESSION_BRIDGE_ENABLED === "true" && process.env.VERCEL_ENV === "preview";
 }
@@ -43,8 +51,10 @@ export async function handleAdminRequest(request: Request, options: AdminConsole
   if (!["overview", "users", "users/update", "credentials", "credentials/revoke", "session", "logout", "identity", "project/catalog", "project/views", "project/views/preview", "write/views/apply", "write/views/update"].includes(path)) return new Response("Not Found", { status: 404 });
   if ((["session"].includes(path) ? !["GET", "POST"].includes(request.method)
     : ["overview", "identity", "project/catalog"].includes(path) ? request.method !== "GET" : request.method !== "POST")) return new Response("Method Not Allowed", { status: 405 });
-  let activeStore: AdminSessionStore | undefined, activeHash: string | undefined;
+  let activeStore: AdminSessionStore | undefined, activeHash: string | undefined, activeRecord: AdminSessionRecord | undefined;
+  let closeOnFailure = false, activeCloseAttempted = false;
   try {
+    options.dbBridge?.assertEnabled();
     const config = options.config ?? loadConfig(), auth = { ...options.auth, currentConfig: options.auth?.currentConfig ?? (() => options.config ?? loadConfig()) };
     const key = auth.bindingKey ?? process.env.MCP_OAUTH_SIGNING_SECRET?.trim() ?? "";
     if (key.length < 32) throw new Error("ADMIN_CONFIG_UNAVAILABLE: A server binding key is required.");
@@ -57,12 +67,21 @@ export async function handleAdminRequest(request: Request, options: AdminConsole
       if (operator.principal.role !== "admin" || !operator.principal.projectIds.length || !config.allowedOwners.length) throw new Error("PERMISSION_DENIED: An authorized personal Admin is required.");
       if (!(await store.takeLoginSlot(digest(operator.proof.subject)))) throw new Error("ADMIN_RATE_LIMITED: Too many session starts.");
       const token = randomBytes(32).toString("base64url"), csrfToken = csrf(token, key);
-      const record = boundSessionRecord(operator, digest(token), digest(csrfToken));
-      await store.create(record); activeHash = record.idHash;
-      const previous = sessionToken(request); if (previous) await store.revoke(digest(previous));
+      const initial = boundSessionRecord(operator, digest(token), digest(csrfToken));
+      const record = options.dbBridge?.prepare(initial, operator) ?? initial;
+      activeHash = record.idHash; activeRecord = record; closeOnFailure = true;
+      await store.create(record);
+      await options.dbBridge?.connect(record, store);
+      const previous = sessionToken(request);
+      if (previous) {
+        const prior = await store.get(digest(previous));
+        if (prior && options.dbBridge) await options.dbBridge.close(prior, store);
+        else await store.revoke(digest(previous));
+      }
       // Persistence/rotation may await remote I/O. Never confirm a stale or expired login snapshot.
       const current = await resolveSessionOperator(() => store.get(record.idHash), auth.currentConfig(), auth);
       if (current.principal.role !== "admin" || !current.principal.projectIds.length) throw new Error("PERMISSION_DENIED: Current Admin access is required.");
+      await options.dbBridge?.assertCurrent(record, store);
       const response = json({ authenticated: true, csrf: csrfToken, expiresAt: record.expiresAt });
       response.headers.set("Set-Cookie", cookie(token, record.expiresAt - Math.floor(Date.now() / 1000))); return response;
     }
@@ -72,16 +91,22 @@ export async function handleAdminRequest(request: Request, options: AdminConsole
     const refresh = async () => {
       const operator = await resolveSessionOperator(load, options.auth?.currentConfig?.() ?? options.config ?? loadConfig(), auth);
       if (operator.principal.role !== "admin") throw new Error("PERMISSION_DENIED: Admin role was removed.");
+      if (activeRecord) await options.dbBridge?.assertCurrent(activeRecord, store);
       return operator;
     };
     const record = await load();
+    activeRecord = record ?? undefined;
     if (!record || !equal(record.csrfHash, digest(csrf(token, key)))) throw new Error("OPERATOR_AUTH_REQUIRED: Session binding changed.");
     if (request.method === "POST") {
       const supplied = request.headers.get("x-csrf-token") ?? "";
       if (supplied.length > 200 || !equal(record.csrfHash, digest(supplied))) throw new Error("ADMIN_CSRF_DENIED: Session CSRF proof is required.");
     }
     if (path === "logout") {
-      await store.revoke(digest(token)); const response = json({ loggedOut: true }); response.headers.set("Set-Cookie", cookie()); return response;
+      closeOnFailure = true;
+      activeCloseAttempted = true;
+      if (options.dbBridge) await options.dbBridge.close(record, store);
+      else await store.revoke(digest(token));
+      const response = json({ loggedOut: true }); response.headers.set("Set-Cookie", cookie()); return response;
     }
     const operator = await refresh();
     if (path === "session") return json({ authenticated: true, csrf: csrf(token, key), expiresAt: record.expiresAt });
@@ -96,9 +121,15 @@ export async function handleAdminRequest(request: Request, options: AdminConsole
       : ["ADMIN_CSRF_DENIED", "ADMIN_PERMISSION_DENIED", "PERMISSION_DENIED", "OPERATOR_IDENTITY_UNAVAILABLE", "PROJECT_MEMBERSHIP_DENIED", "PROJECT_WRITE_NOT_ALLOWED"].includes(code) ? 403
       : code === "ADMIN_INPUT_INVALID" || code === "ADMIN_REQUEST_FAILED" ? 400 : code.startsWith("VIEW_PLAN_") || ["ADMIN_VERSION_CONFLICT", "ADMIN_OPERATION_CONFLICT"].includes(code) ? 409 : 503;
     const response = Response.json({ ok: false, error: { code, retryable: false } }, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
-    if (status === 401 || code === "OPERATOR_IDENTITY_UNAVAILABLE" || code === "PERMISSION_DENIED") {
-      if (activeStore && activeHash) { try { await activeStore.revoke(activeHash); } catch { /* The failed request stays denied; no authentication is returned. */ } }
-      response.headers.set("Set-Cookie", cookie());
+    if (closeOnFailure || status === 401 || code === "OPERATOR_IDENTITY_UNAVAILABLE" || code === "PERMISSION_DENIED" || (options.dbBridge && code !== "ADMIN_CSRF_DENIED" && status >= 500)) {
+      if (activeStore && activeHash) {
+        try {
+          if (activeCloseAttempted) { /* No automatic retry of an unconfirmed close. */ }
+          else if (options.dbBridge && activeRecord) await options.dbBridge.close(activeRecord, activeStore);
+          else await activeStore.revoke(activeHash);
+        } catch { /* The response remains unconfirmed. Neither cookie nor successful authentication is returned. */ }
+      }
+      if (options.dbBridge || path !== "session" || request.method !== "POST" || status === 401 || code === "OPERATOR_IDENTITY_UNAVAILABLE" || code === "PERMISSION_DENIED") response.headers.set("Set-Cookie", cookie());
     }
     return response;
   }
